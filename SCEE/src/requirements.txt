@@ -6,7 +6,7 @@ celery
 redis
 
 # Base de Datos y Variables de Entorno
-mysql-connector-python
+mysql-connector-python # Tengo dudas sobre usar el flask_alchemy o el mysql-connector-python, pero creo que el segundo es más directo para lo que necesito
 python-dotenv
 
 # Extras para desarrollo

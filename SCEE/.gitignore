@@ -24,3 +24,9 @@ env/
 
 # Logs del sistema
 *.log
+
+
+# Notas para mi
+
+src/notas.md
+
