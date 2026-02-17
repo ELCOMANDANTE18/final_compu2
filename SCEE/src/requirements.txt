@@ -1,0 +1,13 @@
+# Comunicación y Asincronismo
+# (asyncio viene en la librería estándar de Python)
+
+# Tareas Distribuidas
+celery
+redis
+
+# Base de Datos y Variables de Entorno
+mysql-connector-python
+python-dotenv
+
+# Extras para desarrollo
+black  # Formateador de código
