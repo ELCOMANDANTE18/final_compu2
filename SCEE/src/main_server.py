@@ -1,64 +1,57 @@
 import asyncio
 import os
 import argparse
+from multiprocessing import Process, Pipe # Agregamos estas herramientas
 from dotenv import load_dotenv
+from processes.auth import auth_process_loop # Importamos tu nuevo proceso
 
-# Cargamos las variables del archivo .env
 load_dotenv()
 
-def get_args():
-    """Paso 1: Parseo de argumentos (Requisito de la materia)."""
-    parser = argparse.ArgumentParser(description="Servidor Principal de SCEE")
-    # Si no pasamos argumentos, usa los del .env por defecto
-    parser.add_argument("-h_host", "--host", default=os.getenv("SERVER_HOST"), help="Host del servidor")
-    parser.add_argument("-p", "--port", type=int, default=os.getenv("SERVER_PORT"), help="Puerto del servidor")
-    return parser.parse_args()
-
+# --- Configuración del Proceso de Auth ---
+# Creamos el Pipe: parent_conn es para el servidor, child_conn para el proceso auth
+parent_conn, child_conn = Pipe()
+auth_proc = Process(target=auth_process_loop, args=(child_conn,))
 
 async def handle_client(reader, writer):
-    """Paso 2: Qué hacer cuando se conecta un cliente."""
     addr = writer.get_extra_info('peername')
     print(f"[*] Conexión establecida con {addr}")
 
     try:
         while True:
-            # Esperamos datos del cliente (máximo 1024 bytes)
             data = await reader.read(1024)
-            if not data:
-                break # Si no hay datos, el cliente se desconectó
+            if not data: break
+            
+            user_data = data.decode().strip()
+            
+            # PASO CLAVE: El servidor principal le manda la data al proceso Auth por el Pipe
+            print(f"[SERVER] Consultando autenticación para {user_data}...")
+            parent_conn.send({"user": user_data, "pass": "1234"}) # Ejemplo simple
+            
+            # Por ahora, leemos la respuesta (ojo: esto es bloqueante, lo arreglaremos en el Issue #5)
+            if parent_conn.poll(timeout=2):
+                response = parent_conn.recv()
+                writer.write(f"Respuesta Auth: {response['status']}\n".encode())
+            else:
+                writer.write(b"Error: Tiempo de espera de auth agotado\n")
+                
+            await writer.drain()
 
-            message = data.decode().strip() # Decodifica los bytes a texto
-            print(f"[<{addr}] Mensaje recibido: {message}")
-
-            # Respuesta simple para probar la conexión
-            response = f"Servidor: Recibí tu mensaje '{message}'\n"
-            writer.write(response.encode()) # Prepara un mensaje , lo convierte a bytes (encode) y lo envía al cliente 
-            await writer.drain() # Asegura que los datos se envíen realmente
-
-    except Exception as e:
-        print(f"[!] Error con el cliente {addr}: {e}")
     finally:
-        print(f"[*] Cerrando conexión con {addr}")
         writer.close()
         await writer.wait_closed()
 
-async def main():  #La central de Operaciones
-    args = get_args()
+async def main():
+    # Iniciamos el proceso hijo antes de arrancar el servidor asíncrono
+    auth_proc.start()
     
-    # Creamos el servidor de sockets
-    server = await asyncio.start_server(handle_client, args.host, args.port)
-
-    addr = server.sockets[0].getsockname()
-    print(f"[V] Servidor SCEE iniciado en {addr}")
-
-    # Mantenemos el servidor corriendo indefinidamente
+    server = await asyncio.start_server(handle_client, '127.0.0.1', 5000)
     async with server:
-        await server.serve_forever() # Es el bucle infinito espera hsata que alguien lo detenga
+        await server.serve_forever()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n[!] Servidor detenido por el usuario.")        
-
-        
+    finally:
+        # Nos aseguramos de cerrar el proceso hijo al apagar todo
+        auth_proc.terminate()
+        auth_proc.join()
