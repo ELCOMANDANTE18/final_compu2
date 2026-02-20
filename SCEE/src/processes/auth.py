@@ -6,43 +6,53 @@ from dotenv import load_dotenv
 load_dotenv()
 
 async def auth_process_loop(pipe_conn):
-    """Proceso hijo dedicado a la seguridad y DB."""
     conn = await aiomysql.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
+        host=os.getenv("DB_HOST"), port=3306,
+        user=os.getenv("DB_USER"), password=os.getenv("DB_PASSWORD"),
         db=os.getenv("DB_NAME")
     )
 
     while True:
-        await asyncio.sleep(0.01) # No saturar CPU
+        await asyncio.sleep(0.01)
         if pipe_conn.poll():
             req = pipe_conn.recv()
             action = req.get("type")
             user = req.get("user")
-            passwd = req.get("pass")
-
             async with conn.cursor() as cur:
                 if action == "LOGIN":
-                    await cur.execute("SELECT id, rol FROM usuarios WHERE username=%s AND password_hash=%s", (user, passwd))
+                    await cur.execute("SELECT id, rol FROM usuarios WHERE username=%s AND password_hash=%s", (user, req.get("pass")))
                     res = await cur.fetchone()
-                    if res:
-                        pipe_conn.send({"status": "OK", "user_id": res[0], "user_requested": user, "role": res[1]})
-                    else:
-                        pipe_conn.send({"status": "ERROR", "user_requested": user, "message": "Credenciales incorrectas"})
+                    if res: pipe_conn.send({"status": "OK", "user_id": res[0], "user_requested": user, "role": res[1]})
+                    else: pipe_conn.send({"status": "ERROR", "user_requested": user, "message": "Credenciales incorrectas"})
                 
                 elif action == "REGISTER":
                     try:
                         rol = req.get("rol", "alumno")
-                        await cur.execute("INSERT INTO usuarios (username, password_hash, rol) VALUES (%s, %s, %s)", (user, passwd, rol))
+                        await cur.execute("INSERT INTO usuarios (username, password_hash, rol) VALUES (%s, %s, %s)", (user, req.get("pass"), rol))
                         await conn.commit()
-                        pipe_conn.send({"status": "OK", "user_requested": user, "role": rol, "message": "Registro exitoso"})
-                    except Exception as e:
-                        pipe_conn.send({"status": "ERROR", "user_requested": user, "message": str(e)})
+                        pipe_conn.send({"status": "OK", "user_requested": user, "role": rol, "user_id": cur.lastrowid})
+                    except Exception as e: pipe_conn.send({"status": "ERROR", "user_requested": user, "message": str(e)})
+
+                elif action == "LIST_SALAS":
+                    await cur.execute("SELECT id, nombre FROM salas")
+                    res = await cur.fetchall()
+                    data = ",".join([f"{r[0]}:{r[1]}" for r in res]) if res else "VACIO"
+                    pipe_conn.send({"status": "OK", "type": "LIST_RES", "data": data, "user_requested": user})
+
+                elif action == "CREATE_SALA":
+                    try:
+                        await cur.execute("INSERT INTO salas (nombre, id_creador) VALUES (%s, %s)", (req.get("nombre"), req.get("id_creador")))
+                        await conn.commit()
+                        pipe_conn.send({"status": "OK", "type": "SALA_CREATED", "user_requested": user})
+                    except Exception as e: pipe_conn.send({"status": "ERROR", "message": str(e), "user_requested": user})
+
+                elif action == "JOIN_SALA":
+                    try:
+                        await cur.execute("INSERT IGNORE INTO miembros_sala (id_usuario, id_sala) VALUES (%s, %s)", (req.get("id_user"), req.get("id_sala")))
+                        await conn.commit()
+                        pipe_conn.send({"status": "OK", "type": "JOIN_RES", "id_sala": req.get("id_sala"), "user_requested": user})
+                    except Exception as e: pipe_conn.send({"status": "ERROR", "message": str(e), "user_requested": user})
 
 def start_auth_process(pipe_conn):
-    """Punto de entrada para multiprocessing."""
-    try:
-        asyncio.run(auth_process_loop(pipe_conn))
-    except KeyboardInterrupt:
-        pass
+    try: asyncio.run(auth_process_loop(pipe_conn))
+    except KeyboardInterrupt: pass

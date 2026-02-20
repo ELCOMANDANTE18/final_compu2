@@ -2,51 +2,71 @@ import socket
 import argparse
 import sys
 
-def get_client_args():
-    parser = argparse.ArgumentParser(description="Cliente SCEE - Acceso al Sistema")
-    parser.add_argument("-u", "--user", required=True, help="Nombre de usuario")
-    parser.add_argument("-p", "--password", required=True, help="Contraseña")
-    parser.add_argument("-r", "--role", choices=['alumno', 'profesor', 'admin'], help="Rol (solo para registro)")
-    parser.add_argument("--register", action="store_true", help="Indica si se desea registrar un nuevo usuario")
+def get_args():
+    parser = argparse.ArgumentParser(description="SCEE Client - Mendoza")
+    parser.add_argument("-u", "--user", required=True)
+    parser.add_argument("-p", "--password", required=True)
+    parser.add_argument("-r", "--role", choices=['alumno', 'profesor'])
+    parser.add_argument("--register", action="store_true")
     return parser.parse_args()
 
+def mostrar_menu_por_rol(rol):
+    print("\n" + "="*40)
+    print(f"       SCEE - MENÚ ({rol.upper()})")
+    print("="*40)
+    print(" 1. Ver salas disponibles")
+    if rol.lower() != "alumno":
+        print(" 2. Crear una nueva sala (Docentes)")
+    print(" 3. Ver mi estado de sesión")
+    print(" 4. Salir")
+    print("="*40)
+    return input("Seleccioná: ")
+
 def main():
-    args = get_client_args()
-    host = "127.0.0.1"
-    port = 5000
-
+    args = get_args()
     try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.connect((host, port))
-        print(f"[*] Conectado al Servidor SCEE en {host}:{port}")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(("127.0.0.1", 5000))
 
-        # Construcción automática del comando según los argumentos
-        if args.register:
-            if not args.role:
-                print("Error: El registro requiere especificar un rol (--role)")
-                sys.exit(1)
-            cmd = f"REGISTER|{args.user}|{args.password}|{args.role}"
-        else:
-            cmd = f"LOGIN|{args.user}|{args.password}"
+        cmd = f"REGISTER|{args.user}|{args.password}|{args.role}" if args.register else f"LOGIN|{args.user}|{args.password}"
+        sock.send(cmd.encode())
+        res = sock.recv(1024).decode().strip()
 
-        # Enviamos la petición inicial
-        client_socket.send(cmd.encode())
-        response = client_socket.recv(1024).decode()
-        print(f"[S] {response}")
+        partes = res.split("|")
+        if "AUTH_RES|200" in res and len(partes) >= 4:
+            mi_nombre, mi_rol = partes[2], partes[3]
+            print(f"\n[S] ¡Bienvenido {mi_nombre}! Rol: {mi_rol}")
 
-        # Si el acceso fue exitoso, entramos en modo interactivo para los comandos de sala
-        if "200" in response:
-            print("--- Sesión Iniciada. Escribe comandos o 'salir' ---")
             while True:
-                msg = input(f"{args.user} > ")
-                if msg.lower() == 'salir': break
-                client_socket.send(msg.encode())
-                print(f"[S] {client_socket.recv(1024).decode()}")
+                opc = mostrar_menu_por_rol(mi_rol)
+                if opc == "1":
+                    sock.send(b"LIST_SALAS")
+                    raw = sock.recv(1024).decode()
+                    if "|" in raw:
+                        data = raw.split("|")[1]
+                        if data == "VACIO": print("\n[!] No hay salas.")
+                        else:
+                            print("\n--- SALAS ---")
+                            for s in data.split(","):
+                                sid, snom = s.split(":")
+                                print(f"  ID: {sid} | {snom}")
+                            target = input("\nID para unirse: ")
+                            if target:
+                                sock.send(f"JOIN|{target}".encode())
+                                print(f"\n[S] {sock.recv(1024).decode()}")
+                elif opc == "2" and mi_rol.lower() != "alumno":
+                    nom = input("Nombre de sala: ")
+                    sock.send(f"CREATE_SALA|{nom}".encode())
+                    print(f"\n[S] {sock.recv(1024).decode()}")
+                elif opc == "3":
+                    sock.send(b"INFO_SESION")
+                    info = sock.recv(1024).decode()
+                    if "OK|200" in info:
+                        print("\n" + "─"*55 + f"\n  {info.split('|')[2].strip()}\n" + "─"*55)
+                elif opc == "4": break
+        else:
+            print(f"\n[!] Error: {res}")
+    except Exception as e: print(f"\n[!] Error: {e}")
+    finally: sock.close()
 
-    except Exception as e:
-        print(f"[!] Error de conexión: {e}")
-    finally:
-        client_socket.close()
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
