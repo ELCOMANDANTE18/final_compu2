@@ -1,58 +1,52 @@
-import asyncio
-import os
+import socket
 import argparse
-from dotenv import load_dotenv
+import sys
 
-load_dotenv()
-
-def get_args():
-    """Parseo de argumentos para el cliente."""
-    parser = argparse.ArgumentParser(description="Cliente de SCEE")
-    parser.add_argument("-h_host", "--host", default=os.getenv("SERVER_HOST"), help="IP del servidor")
-    parser.add_argument("-p", "--port", type=int, default=os.getenv("SERVER_PORT"), help="Puerto del servidor")
+def get_client_args():
+    parser = argparse.ArgumentParser(description="Cliente SCEE - Acceso al Sistema")
+    parser.add_argument("-u", "--user", required=True, help="Nombre de usuario")
+    parser.add_argument("-p", "--password", required=True, help="Contraseña")
+    parser.add_argument("-r", "--role", choices=['alumno', 'profesor', 'admin'], help="Rol (solo para registro)")
+    parser.add_argument("--register", action="store_true", help="Indica si se desea registrar un nuevo usuario")
     return parser.parse_args()
 
-async def send_messages(writer):
-    """Lee la entrada del usuario y la envía al servidor."""
-    print("Escribe tus mensajes (o 'salir' para terminar):")
-    while True:
-        # Usamos run_in_executor para que input() no bloquee el bucle de eventos
-        message = await asyncio.get_event_loop().run_in_executor(None, input, "> ")
-        
-        if message.lower() == 'salir':
-            break
-            
-        writer.write(message.encode())
-        await writer.drain()
+def main():
+    args = get_client_args()
+    host = "127.0.0.1"
+    port = 5000
 
-async def receive_messages(reader):
-    """Escucha respuestas del servidor de forma asíncrona."""
-    while True:
-        data = await reader.read(1024)
-        if not data:
-            print("\n[!] Conexión cerrada por el servidor.")
-            break
-        print(f"\n[S] {data.decode().strip()}")
-
-async def main():
-    args = get_args()
     try:
-        # Conexión TCP al servidor central
-        reader, writer = await asyncio.open_connection(args.host, args.port)
-        print(f"[*] Conectado a la Central de Operaciones en {args.host}:{args.port}")
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((host, port))
+        print(f"[*] Conectado al Servidor SCEE en {host}:{port}")
 
-        # Ejecutamos enviar y recibir al mismo tiempo (Concurrencia)
-        await asyncio.gather(
-            send_messages(writer),
-            receive_messages(reader)
-        )
+        # Construcción automática del comando según los argumentos
+        if args.register:
+            if not args.role:
+                print("Error: El registro requiere especificar un rol (--role)")
+                sys.exit(1)
+            cmd = f"REGISTER|{args.user}|{args.password}|{args.role}"
+        else:
+            cmd = f"LOGIN|{args.user}|{args.password}"
 
-    except ConnectionRefusedError:
-        print("[!] No se pudo conectar. ¿Está prendido el servidor?")
+        # Enviamos la petición inicial
+        client_socket.send(cmd.encode())
+        response = client_socket.recv(1024).decode()
+        print(f"[S] {response}")
+
+        # Si el acceso fue exitoso, entramos en modo interactivo para los comandos de sala
+        if "200" in response:
+            print("--- Sesión Iniciada. Escribe comandos o 'salir' ---")
+            while True:
+                msg = input(f"{args.user} > ")
+                if msg.lower() == 'salir': break
+                client_socket.send(msg.encode())
+                print(f"[S] {client_socket.recv(1024).decode()}")
+
     except Exception as e:
-        print(f"[!] Error: {e}")
+        print(f"[!] Error de conexión: {e}")
     finally:
-        print("[*] Desconectado.")
+        client_socket.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
