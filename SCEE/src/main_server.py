@@ -17,13 +17,13 @@ def get_args():
     parser.add_argument("-b", "--host", default=os.getenv("SERVER_HOST", "127.0.0.1"))
     return parser.parse_args()
 
-def handle_auth_response(pipe_conn):
+def handle_auth_response(pipe_conn): #La Respuesta Sincronica
     """Callback que sincroniza MariaDB con los sockets """
-    if pipe_conn.poll():
-        response = pipe_conn.recv()
+    if pipe_conn.poll(): # EL recepcionista mira el buzón de entrada para ver si llegó una carta
+        response = pipe_conn.recv() # Abre la carta y lee los resultados que le mandó el departamento de archivos 
         username = response.get("user_requested")
         status = response.get("status")
-        writer = pending_auths.pop(username, None)
+        writer = pending_auths.pop(username, None) # Busca en su librera de "Clientes Esperando respuesta", tacha el nombre de la lista y toma el teléfono (el writer) para llamar a ese cliente
         
         if writer:
             tipo = response.get("type")
@@ -58,7 +58,7 @@ def handle_auth_response(pipe_conn):
             writer.write(msg.encode())
             asyncio.create_task(writer.drain())
 
-async def handle_client(reader, writer, pipe_conn):
+async def handle_client(reader, writer, pipe_conn): #Recepción 
     addr = writer.get_extra_info('peername')
     print(f"[+] CONEXIÓN ENTRANTE: {addr}")
 
@@ -92,7 +92,7 @@ async def handle_client(reader, writer, pipe_conn):
                     pipe_conn.send({"type": "LIST_MY_SALAS", "id_user": session['user_id'], "user": session['username']})
                     pending_auths[session['username']] = writer
                 
-                elif message.startswith("CREATE_SALA|"):
+                elif message.startswith("CREATE_SALA|"): 
                     if session['rol'].lower() != 'profesor':
                         writer.write(b"ERROR|405|Solo profesores pueden crear salas\n")
                     else:
