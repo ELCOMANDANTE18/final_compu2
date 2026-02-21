@@ -7,8 +7,9 @@ from processes.auth import start_auth_process
 
 load_dotenv()
 
-pending_auths = {}   
-active_sessions = {} 
+# --- ESTADO GLOBAL ---
+pending_auths = {}   # {username: writer}
+active_sessions = {} # {writer: {user_id, username, rol, id_sala}}
 
 def get_args():
     parser = argparse.ArgumentParser(description="SCEE Server - Mendoza")
@@ -17,7 +18,7 @@ def get_args():
     return parser.parse_args()
 
 def handle_auth_response(pipe_conn):
-    """Procesa lo que devuelve el proceso de MariaDB."""
+    """Callback que sincroniza MariaDB con los sockets """
     if pipe_conn.poll():
         response = pipe_conn.recv()
         username = response.get("user_requested")
@@ -32,15 +33,16 @@ def handle_auth_response(pipe_conn):
                 elif tipo == "MY_SALAS_RES":
                     msg = f"MY_SALAS_LIST|{response.get('data')}\n"
                 elif tipo == "JOIN_RES":
+                    # Actualizamos la sala en la sesión activa en RAM
                     if writer in active_sessions:
                         active_sessions[writer]["id_sala"] = response.get("id_sala")
                     msg = f"JOIN_OK|Te uniste a la sala {response.get('id_sala')}\n"
-                    print(f"[DB] {username} se unió exitosamente a la sala {response.get('id_sala')}")
+                    print(f"[DB] {username} entró a la sala {response.get('id_sala')}")
                 elif tipo == "SALA_CREATED":
                     msg = "OK|201|Sala creada exitosamente\n"
-                    print(f"[DB] Nueva sala creada por {username}")
+                    print(f"[DB] {username} creó una nueva sala")
                 else: 
-                    # --- LOGIN / REGISTER EXITOSO ---
+                    # LOGIN / REGISTER
                     active_sessions[writer] = {
                         "user_id": response.get("user_id"),
                         "username": username,
@@ -58,7 +60,7 @@ def handle_auth_response(pipe_conn):
 
 async def handle_client(reader, writer, pipe_conn):
     addr = writer.get_extra_info('peername')
-    print(f"[+] NUEVA CONEXIÓN: {addr}")
+    print(f"[+] CONEXIÓN ENTRANTE: {addr}")
 
     try:
         while True:
@@ -68,35 +70,44 @@ async def handle_client(reader, writer, pipe_conn):
             session = active_sessions.get(writer)
 
             if not session:
-                # --- FASE DE IDENTIFICACIÓN ---
+                # --- IDENTIFICACIÓN ---
                 parts = message.split("|")
                 if len(parts) >= 3:
                     cmd, user = parts[0], parts[1]
-                    print(f"[AUTH] Solicitud de {cmd} para el usuario: {user}")
+                    print(f"[AUTH] Intento de {cmd} para: {user}")
                     pending_auths[user] = writer
                     if cmd == "LOGIN":
                         pipe_conn.send({"type": "LOGIN", "user": user, "pass": parts[2]})
                     elif cmd == "REGISTER":
                         pipe_conn.send({"type": "REGISTER", "user": user, "pass": parts[2], "rol": parts[3]})
             else:
-                # --- LOG DE COMANDOS DE USUARIO ---
-                print(f"[{session['username']}] envió comando: {message}")
+                # --- COMANDOS CON SESIÓN ACTIVA ---
+                print(f"[{session['username']}] comando: {message}")
                 
                 if message == "LIST_AVAILABLE":
                     pipe_conn.send({"type": "LIST_AVAILABLE", "id_user": session['user_id'], "user": session['username']})
                     pending_auths[session['username']] = writer
+                
                 elif message == "LIST_MY_SALAS":
                     pipe_conn.send({"type": "LIST_MY_SALAS", "id_user": session['user_id'], "user": session['username']})
                     pending_auths[session['username']] = writer
+                
                 elif message.startswith("CREATE_SALA|"):
-                    if session['rol'] == 'profesor':
+                    if session['rol'].lower() != 'profesor':
+                        writer.write(b"ERROR|405|Solo profesores pueden crear salas\n")
+                    else:
                         nom = message.split("|")[1]
                         pipe_conn.send({"type": "CREATE_SALA", "nombre": nom, "id_creador": session['user_id'], "user": session['username']})
                         pending_auths[session['username']] = writer
+
                 elif message.startswith("JOIN|"):
-                    id_s = message.split("|")[1]
-                    pipe_conn.send({"type": "JOIN_SALA", "id_sala": id_s, "id_user": session['user_id'], "user": session['username']})
-                    pending_auths[session['username']] = writer
+                    try:
+                        id_s = message.split("|")[1]
+                        pipe_conn.send({"type": "JOIN_SALA", "id_sala": id_s, "id_user": session['user_id'], "user": session['username']})
+                        pending_auths[session['username']] = writer
+                    except IndexError:
+                        writer.write(b"ERROR|400|Formato de ID invalido\n")
+                
                 elif message == "INFO_SESION":
                     res = f"OK|200|👤 Usuario: {session['username']} | 🔑 Rol: {session['rol']} | 🏠 Sala Actual: {session['id_sala']}\n"
                     writer.write(res.encode())
@@ -105,9 +116,9 @@ async def handle_client(reader, writer, pipe_conn):
     except Exception as e:
         print(f"[!] Error con {addr}: {e}")
     finally:
-        session = active_sessions.pop(writer, None)
-        u = session['username'] if session else "Anónimo"
-        print(f"[-] DESCONECTADO: {u} ({addr})")
+        session_info = active_sessions.pop(writer, None)
+        u_name = session_info['username'] if session_info else "Anónimo"
+        print(f"[-] DESCONECTADO: {u_name} ({addr})")
         writer.close()
         await writer.wait_closed()
 

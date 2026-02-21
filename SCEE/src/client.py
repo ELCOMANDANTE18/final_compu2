@@ -14,7 +14,7 @@ def mostrar_menu_por_rol(rol):
     print(f"       SCEE - PANEL ({rol.upper()})")
     print("="*45)
     print(" 1. Buscar salas nuevas (Unirse)")
-    print(" 2. Ver mis salas actuales (Entrar)")
+    print(" 2. Ver mis salas actuales (Entrar)") # <--- ¡Ahora sí entra!
     if rol.lower() == "profesor":
         print(" 3. Crear una nueva sala (Docentes)")
     print(" 4. Ver mi estado de sesión")
@@ -36,33 +36,49 @@ def main():
             mi_rol = partes[3]
             while True:
                 opc = mostrar_menu_por_rol(mi_rol)
+                
+                # --- OPCIÓN 1: UNIRSE A UNA NUEVA ---
                 if opc == "1":
                     sock.send(b"LIST_AVAILABLE")
                     raw = sock.recv(1024).decode().split("|")
                     if raw[1] == "VACIO": print("\n[!] No hay salas nuevas.")
                     else:
+                        print("\n--- SALAS DISPONIBLES ---")
                         for s in raw[1].split(","):
                             sid, snom = s.split(":")
                             print(f" ID: {sid} | {snom}")
-                        target = input("\nID para unirse: ")
+                        target = input("\nIngresá ID para unirte y entrar: ")
                         if target:
                             sock.send(f"JOIN|{target}".encode())
                             print(f"\n[S] {sock.recv(1024).decode()}")
+
+                # --- OPCIÓN 2: ENTRAR A UNA DONDE YA ESTOY ---
                 elif opc == "2":
                     sock.send(b"LIST_MY_SALAS")
                     raw = sock.recv(1024).decode().split("|")
-                    if raw[1] == "VACIO": print("\n[!] No estás en ninguna sala.")
+                    if raw[1] == "VACIO": print("\n[!] No sos miembro de ninguna sala todavía.")
                     else:
+                        print("\n--- TUS SALAS ---")
                         for s in raw[1].split(","):
                             sid, snom = s.split(":")
-                            print(f" ID: {sid} | {snom} (UNIDO)")
+                            print(f" ID: {sid} | {snom} (MIEMBRO)")
+                        
+                        target = input("\nIngresá el ID de la sala a la que querés entrar: ")
+                        if target:
+                            # Reutilizamos JOIN porque el server ya maneja la membresía existente
+                            sock.send(f"JOIN|{target}".encode())
+                            print(f"\n[S] {sock.recv(1024).decode()}")
+
                 elif opc == "3" and mi_rol == "profesor":
                     nom = input("Nombre de sala: ")
                     sock.send(f"CREATE_SALA|{nom}".encode())
                     print(f"\n[S] {sock.recv(1024).decode()}")
+
                 elif opc == "4":
                     sock.send(b"INFO_SESION")
+                    # Mostramos el recuadro de info completo
                     print(f"\n{sock.recv(1024).decode().split('|')[2]}")
+                
                 elif opc == "5": break
     finally: sock.close()
 
