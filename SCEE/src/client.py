@@ -5,71 +5,72 @@ res_q = queue.Queue()
 def listen(sock):
     while True:
         try:
-            data = sock.recv(1024).decode().strip()
+            data = sock.recv(2048).decode().strip()
             if not data: break
             for line in data.split('\n'):
                 if line.startswith("CHAT|"):
                     _, u, m = line.split("|")
-                    print(f"\n\r[📩 {u}]: {m}\nSala >> ", end="", flush=True)
+                    sys.stdout.write(f"\r[📩 {u}]: {m}\nSala >> ")
+                    sys.stdout.flush()
                 else: res_q.put(line)
         except: break
 
 def menu_principal(rol):
-    print("\n" + "="*40 + f"\n  SCEE - PANEL ({rol.upper()})\n" + "="*40)
-    print(" 1. Buscar salas\n 2. Mis salas (Entrar)")
-    if rol.lower() == "profesor":
-        print(" 3. Crear sala (Profe)")
-    print(" 4. Salir")
-    print("="*40)
+    print(f"\n=== SCEE PANEL ({rol.upper()}) ===")
+    print("1. Buscar salas\n2. Mis salas (Entrar)\n3. Usuarios activos\n4. Salir")
     return input("Seleccioná: ")
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-u", "--user", required=True)
-    parser.add_argument("-p", "--password", required=True)
-    args = parser.parse_args()
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(("127.0.0.1", 5000))
-    sock.send(f"LOGIN|{args.user}|{args.password}".encode())
+    p = argparse.ArgumentParser(); p.add_argument("-u"); p.add_argument("-p"); p.add_argument("-r", default="alumno")
+    args = p.parse_args(); sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM); sock.connect(("127.0.0.1", 5000))
+    sock.send(f"LOGIN|{args.u}|{args.p}|{args.r}".encode())
     
-    r = sock.recv(1024).decode().strip()
-    if "AUTH_RES|200" in r:
-        mi_rol = r.split("|")[3]
-        print(f"[S] Bienvenido {r.split('|')[2]}")
+    auth_data = sock.recv(1024).decode().strip()
+    if "AUTH_RES|200" in auth_data:
+        mi_rol = auth_data.split("|")[3]; print(f"[S] Bienvenido {auth_data.split('|')[2]}")
         threading.Thread(target=listen, args=(sock,), daemon=True).start()
         
         while True:
             opc = menu_principal(mi_rol)
-            if opc == "1":
-                sock.send(b"LIST_AVAILABLE")
-                raw = res_q.get().split("|")
-                if raw[1] != "VACIO":
-                    for s in raw[1].split(","): print(f" ID: {s.split(':')[0]} | {s.split(':')[1]}")
-                    t = input("\nID para unirse: ")
-                    if t: sock.send(f"JOIN|{t}".encode()); res_q.get()
-            elif opc == "2":
-                sock.send(b"LIST_MY_SALAS")
-                raw = res_q.get().split("|")
-                if raw[1] != "VACIO":
-                    for s in raw[1].split(","): print(f" ID: {s.split(':')[0]} | {s.split(':')[1]}")
-                    tid = input("\nID para entrar: ")
-                    if tid:
-                        sock.send(f"JOIN|{tid}".encode())
-                        rid = res_q.get().split("|")[1]
-                        print(f"\n[!] SALA {rid} ACTIVA. Escribí tu mensaje o '/salir'.")
+            if opc in ["1", "2"]:
+                sock.send(b"LIST_AVAILABLE" if opc == "1" else b"LIST_MY_SALAS")
+                resp = res_q.get().split("|")
+                if resp[1] != "VACIO":
+                    for s in resp[1].split(","): print(f" ID: {s.split(':')[0]} | {s.split(':')[1]}")
+                    tid = input("\nID para entrar (o Enter para volver): ")
+                    if not tid or not tid.isdigit(): continue
+                    
+                    sock.send(f"JOIN|{tid}".encode()); d_join = res_q.get().split("|")
+                    if d_join[0] == "JOIN_OK":
+                        print(f"\n--- HISTORIAL SALA {d_join[1]} ---")
+                        if d_join[2] != "VACIO":
+                            for m in d_join[2:]:
+                                if ":" in m: uh, mh = m.split(":", 1); print(f"[{uh}]: {mh}")
+                        
+                        # --- AUTO-NOTIFICACIÓN DE TAREAS AL ENTRAR ---
+                        sock.send(b"GET_TASKS")
+                        t_check = res_q.get().split("|")
+                        if t_check[0] == "TASKS_LIST" and t_check[1] != "VACIO":
+                            num = len(t_check) - 1
+                            print(f"\n🔔 AVISO: Tenés {num} tareas pendientes. Usá /tareas para verlas.")
+
+                        print(f"\n[!] Comandos: /tareas, {'' if mi_rol != 'profesor' else '/nueva, '}ENTER para salir.")
                         while True:
-                            sub = input("Sala >> ")
-                            if sub.strip() == "/salir":
-                                sock.send(b"LEAVE_ROOM"); res_q.get(); break
-                            elif sub.strip():
-                                sock.send(f"SEND_MSG|{sub}".encode()); res_q.get()
-            elif opc == "3" and mi_rol.lower() == "profesor":
-                n = input("Nombre sala: ").strip()
-                if n:
-                    d = input("Descripción: ").strip()
-                    sock.send(f"CREATE_SALA|{n}|{d}".encode()); res_q.get()
-                else: print("[!] El nombre es obligatorio.")
+                            txt = input("Sala >> ")
+                            if not txt.strip(): sock.send(b"LEAVE_ROOM"); res_q.get(); break
+                            elif txt == "/tareas":
+                                sock.send(b"GET_TASKS"); t_res = res_q.get().split("|")
+                                if t_res[1] != "VACIO":
+                                    print("\n--- TAREAS ---")
+                                    for t in t_res[1:]:
+                                        try:
+                                            # Separamos título (primero) y fecha (último), la desc es lo del medio
+                                            partes = t.split(":")
+                                            if len(partes) >= 3:
+                                                print(f"📌 {partes[0]}\n   📅 Entrega: {partes[-1]}\n   📝 Desc: {':'.join(partes[1:-1])}\n")
+                                        except: continue
+                                else: print("Sin tareas.")
+                            else: sock.send(f"SEND_MSG|{txt}".encode()); res_q.get()
             elif opc == "4": break
     sock.close()
 

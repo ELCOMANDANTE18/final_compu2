@@ -1,100 +1,66 @@
-import asyncio, os, argparse
+import asyncio, os, argparse, datetime
 from multiprocessing import Process, Pipe
 from dotenv import load_dotenv
 from processes.auth import start_auth_process
 
 load_dotenv()
-
 pending_auths, active_sessions = {}, {}
 
-async def broadcast_to_room(message, room_id, sender_username, sender_writer):
-    """Difusión de mensajes en tiempo real filtrada por ID de sala."""
-    payload = f"CHAT|{sender_username}|{message}\n".encode()
-    count = 0
-    for writer, session in active_sessions.items():
-        if str(session.get('id_sala')) == str(room_id) and writer != sender_writer:
-            writer.write(payload)
-            await writer.drain()
-            count += 1
-    return count
+def log(tag, msg):
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [{tag}] {msg}")
+
+async def broadcast(message, room_id, sender_writer, sender_name):
+    payload = f"CHAT|{sender_name}|{message}\n".encode()
+    for writer, sess in active_sessions.items():
+        if str(sess.get('id_sala')) == str(room_id) and writer != sender_writer:
+            try: writer.write(payload); await writer.drain()
+            except: continue
 
 def handle_auth_response(pipe_conn):
     if pipe_conn.poll():
-        response = pipe_conn.recv()
-        username, status, tipo = response.get("user_requested"), response.get("status"), response.get("type")
-        writer = pending_auths.pop(username, None)
-        
+        res = pipe_conn.recv()
+        user, status, tipo = res.get("user_requested"), res.get("status"), res.get("type")
+        writer = pending_auths.pop(user, None)
         if writer:
             if status == "OK":
-                if tipo == "LIST_RES": msg = f"SALAS_LIST|{response.get('data')}\n"
-                elif tipo == "MY_SALAS_RES": msg = f"MY_SALAS_LIST|{response.get('data')}\n"
-                elif tipo == "JOIN_RES":
-                    active_sessions[writer]["id_sala"] = response.get("id_sala")
-                    msg = f"JOIN_OK|{response.get('id_sala')}\n"
-                    print(f"[SALA] {username} entró a la sala {response.get('id_sala')}")
-                elif tipo == "SALA_CREATED":
-                    msg = "OK|201|Sala creada\n"
-                    print(f"[DB] {username} creó una nueva sala exitosamente")
-                elif tipo == "LOGIN_RES":
-                    active_sessions[writer] = {"user_id": response.get("user_id"), "username": username, "rol": response.get("role"), "id_sala": "Ninguna"}
-                    msg = f"AUTH_RES|200|{username}|{response.get('role')}\n"
-                    print(f"[SESIÓN] {username} ({response.get('role')}) conectado")
-            else:
-                msg = f"ERROR|401|{response.get('message')}\n"
-            
-            writer.write(msg.encode())
-            asyncio.create_task(writer.drain())
+                if tipo == "JOIN_RES": 
+                    active_sessions[writer]["id_sala"] = res.get("id_sala")
+                    msg = f"JOIN_OK|{res.get('id_sala')}|{res.get('history')}\n"
+                elif tipo in ["LOGIN_RES", "AUTH_RES"]:
+                    active_sessions[writer] = {"user_id": res.get("user_id"), "username": user, "rol": res.get("role"), "id_sala": "Ninguna"}
+                    msg = f"AUTH_RES|200|{user}|{res.get('role')}\n"
+                else: msg = f"{tipo}|{res.get('data', 'OK')}\n"
+            else: msg = f"ERROR|400|{res.get('message')}\n"
+            writer.write(msg.encode()); asyncio.create_task(writer.drain())
 
 async def handle_client(reader, writer, pipe_conn):
     try:
         while True:
             data = await reader.read(1024)
             if not data: break
-            message = data.decode().strip()
-            session = active_sessions.get(writer)
-
-            if not session:
-                p = message.split("|")
-                if len(p) >= 3 and p[0] == "LOGIN":
-                    pending_auths[p[1]] = writer
-                    pipe_conn.send({"type": "LOGIN", "user": p[1], "pass": p[2]})
+            m = data.decode().strip(); sess = active_sessions.get(writer)
+            if sess:
+                u = sess['username']
+                if m.startswith("JOIN|"): pipe_conn.send({"type": "JOIN_SALA", "id_sala": m.split("|")[1], "id_user": sess['user_id'], "user": u})
+                elif m.startswith("SEND_MSG|"):
+                    pipe_conn.send({"type": "SAVE_MSG", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "msg": m.split("|")[1]})
+                    await broadcast(m.split("|")[1], sess['id_sala'], writer, u); writer.write(b"DATA_RES|OK\n")
+                elif m == "GET_TASKS": pipe_conn.send({"type": "GET_TASKS", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "user": u})
+                elif m.startswith("LIST_"): pipe_conn.send({"type": m, "id_user": sess['user_id'], "user": u})
+                elif m == "LEAVE_ROOM": sess['id_sala'] = "Ninguna"; writer.write(b"DATA_RES|LEAVE\n")
+                pending_auths[u] = writer
             else:
-                if message == "LIST_AVAILABLE":
-                    pipe_conn.send({"type": "LIST_AVAILABLE", "id_user": session['user_id'], "user": session['username']})
-                    pending_auths[session['username']] = writer
-                elif message == "LIST_MY_SALAS":
-                    pipe_conn.send({"type": "LIST_MY_SALAS", "id_user": session['user_id'], "user": session['username']})
-                    pending_auths[session['username']] = writer
-                elif message.startswith("SEND_MSG|"):
-                    txt = message.split("|")[1]
-                    c = await broadcast_to_room(txt, session['id_sala'], session['username'], writer)
-                    print(f"[CHAT] {session['username']} (Sala {session['id_sala']}): {txt} -> {c} receptores")
-                    writer.write(b"OK|200|Enviado\n")
-                elif message == "LEAVE_ROOM":
-                    old = session['id_sala']
-                    session['id_sala'] = "Ninguna"
-                    print(f"[SALA] {session['username']} salió de la sala {old}")
-                    writer.write(b"OK|200|Menu\n")
-                elif message.startswith("CREATE_SALA|"):
-                    parts = message.split("|")
-                    pipe_conn.send({"type": "CREATE_SALA", "nombre": parts[1], "descripcion": parts[2], "id_creador": session['user_id'], "user": session['username']})
-                    pending_auths[session['username']] = writer
-                elif message.startswith("JOIN|"):
-                    pipe_conn.send({"type": "JOIN_SALA", "id_sala": message.split("|")[1], "id_user": session['user_id'], "user": session['username']})
-                    pending_auths[session['username']] = writer
+                p = m.split("|")
+                if len(p) >= 3: pending_auths[p[1]] = writer; pipe_conn.send({"type": p[0], "user": p[1], "pass": p[2], "rol": p[3] if len(p)>3 else "alumno"})
             await writer.drain()
     finally:
-        u = active_sessions.pop(writer, None)
-        if u: print(f"[-] Desconectado: {u['username']}")
-        writer.close()
+        u = active_sessions.pop(writer, None); writer.close()
 
 async def main():
-    loop = asyncio.get_running_loop()
-    p_conn, c_conn = Pipe()
-    Process(target=start_auth_process, args=(c_conn,), daemon=True).start()
-    loop.add_reader(p_conn.fileno(), handle_auth_response, p_conn)
+    p_conn, c_conn = Pipe(); Process(target=start_auth_process, args=(c_conn,), daemon=True).start()
+    loop = asyncio.get_running_loop(); loop.add_reader(p_conn.fileno(), handle_auth_response, p_conn)
     server = await asyncio.start_server(lambda r, w: handle_client(r, w, p_conn), "127.0.0.1", 5000)
-    print("="*50 + "\n   SERVER SCEE - MENDOZA ACTIVO\n" + "="*50)
+    print("--- SERVER SCEE ACTIVO (MENDOZA) ---")
     async with server: await server.serve_forever()
 
 if __name__ == "__main__": asyncio.run(main())
