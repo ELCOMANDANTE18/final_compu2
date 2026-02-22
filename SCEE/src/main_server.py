@@ -1,7 +1,8 @@
 import asyncio, os, argparse, datetime
 from multiprocessing import Process, Pipe
 from dotenv import load_dotenv
-from processes.auth import start_auth_process
+
+from src.processes.auth import start_auth_process
 
 load_dotenv()
 pending_auths, active_sessions = {}, {}
@@ -56,11 +57,51 @@ async def handle_client(reader, writer, pipe_conn):
     finally:
         u = active_sessions.pop(writer, None); writer.close()
 
-async def main():
-    p_conn, c_conn = Pipe(); Process(target=start_auth_process, args=(c_conn,), daemon=True).start()
-    loop = asyncio.get_running_loop(); loop.add_reader(p_conn.fileno(), handle_auth_response, p_conn)
-    server = await asyncio.start_server(lambda r, w: handle_client(r, w, p_conn), "127.0.0.1", 5000)
-    print("--- SERVER SCEE ACTIVO (MENDOZA) ---")
-    async with server: await server.serve_forever()
+def print_banner():
+    """Imprime el encabezado visual del sistema SCEE."""
+    banner = r"""
+      ______   ______  ________  ________ 
+     /      \ /      \|        \|        \
+    |  $$$$$$|  $$$$$$| $$$$$$$$| $$$$$$$$
+    | $$___\$| $$   \$| $$__    | $$__    
+     \$$    \| $$     | $$  \   | $$  \   
+     _\$$$$$$| $$   __| $$$$$   | $$$$$   
+    |  \__| $| $$__/  | $$_____ | $$_____ 
+     \$$    $$\$$    $| $$     \| $$     \
+      \$$$$$$  \$$$$$$ \$$$$$$$$ \$$$$$$$$
+    """
+    print(banner)
+    print("="*42)
+    print(" SCEE - Sistema de Coordinación de Estudios")
+    print(" Sede: Mendoza, Argentina 🍇📍")
+    print("="*42 + "\n")
 
-if __name__ == "__main__": asyncio.run(main())
+async def main():
+    # Limpieza de terminal y bienvenida
+    os.system('clear') if os.name == 'posix' else os.system('cls')
+    print_banner()
+
+    # Configuración de IPC (Pipes) y Proceso de Base de Datos
+    parent_conn, child_conn = Pipe()
+    db_proc = Process(target=start_auth_process, args=(child_conn,), daemon=True)
+    db_proc.start()
+
+    # Monitoreo del Pipe dentro del loop de asyncio
+    loop = asyncio.get_running_loop()
+    loop.add_reader(parent_conn.fileno(), handle_auth_response, parent_conn)
+
+    # Inicio del Servidor de Sockets
+    server = await asyncio.start_server(lambda r, w: handle_client(r, w, parent_conn), "127.0.0.1", 5000)
+    
+    # La línea que necesitabas con el timestamp dinámico:
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [SERVER] Escuchando en 127.0.0.1:5000")
+
+    async with server:
+        await server.serve_forever()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[!] Servidor SCEE finalizado manualmente.")
+

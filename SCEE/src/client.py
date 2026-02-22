@@ -1,6 +1,27 @@
-import socket, argparse, threading, queue, sys
+import socket, argparse, threading, queue, sys, os
 
 res_q = queue.Queue()
+
+
+
+def print_banner():
+    """Muestra el logo del proyecto al iniciar la sesión del cliente."""
+    banner = r"""
+      ______   ______  ________  ________ 
+     /      \ /      \|        \|        \
+    |  $$$$$$|  $$$$$$| $$$$$$$$| $$$$$$$$
+    | $$___\$| $$   \$| $$__    | $$__    
+     \$$    \| $$     | $$  \   | $$  \   
+     _\$$$$$$| $$   __| $$$$$   | $$$$$   
+    |  \__| $| $$__/  | $$_____ | $$_____ 
+     \$$    $$\$$    $| $$     \| $$     \
+      \$$$$$$  \$$$$$$ \$$$$$$$$ \$$$$$$$$
+    """
+    print(banner)
+    print("="*42)
+    print(" SCEE CLIENT - Sistema de Coordinación")
+    print(" Sede Mendoza 🍇 | Usuario Activo")
+    print("="*42 + "\n")
 
 def listen(sock):
     while True:
@@ -21,6 +42,8 @@ def menu_principal(rol):
     return input("Seleccioná: ")
 
 def main():
+    os.system('clear') if os.name == 'posix' else os.system('cls')
+    print_banner()
     p = argparse.ArgumentParser(); p.add_argument("-u"); p.add_argument("-p"); p.add_argument("-r", default="alumno")
     args = p.parse_args(); sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM); sock.connect(("127.0.0.1", 5000))
     sock.send(f"LOGIN|{args.u}|{args.p}|{args.r}".encode())
