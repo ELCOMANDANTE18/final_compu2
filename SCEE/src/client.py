@@ -82,18 +82,45 @@ def main():
                             txt = input("Sala >> ")
                             if not txt.strip(): sock.send(b"LEAVE_ROOM"); res_q.get(); break
                             elif txt == "/tareas":
-                                sock.send(b"GET_TASKS"); t_res = res_q.get().split("|")
+                                sock.send(b"GET_TASKS")
+                                t_res = res_q.get().split("|")
+                                
                                 if t_res[1] != "VACIO":
-                                    print("\n--- TAREAS ---")
+                                    print("\n--- 📚 TAREAS PENDIENTES ---")
+                                    lista_titulos = []
                                     for t in t_res[1:]:
                                         try:
-                                            # Separamos título (primero) y fecha (último), la desc es lo del medio
-                                            partes = t.split(":")
+                                            # Usamos § que es el separador que definiste en la DB
+                                            partes = t.split("§") 
                                             if len(partes) >= 3:
-                                                print(f"📌 {partes[0]}\n   📅 Entrega: {partes[-1]}\n   📝 Desc: {':'.join(partes[1:-1])}\n")
+                                                titulo, desc, fecha = partes[0], partes[1], partes[2]
+                                                lista_titulos.append(titulo)
+                                                print(f"📌 [{titulo}]\n   📅 Entrega: {fecha}\n   📝 Detalle: {desc}\n")
                                         except: continue
-                                else: print("Sin tareas.")
-                            else: sock.send(f"SEND_MSG|{txt}".encode()); res_q.get()
+                                    
+                                    # --- LÓGICA DE ENTREGA INMEDIATA ---
+                                    opcion = input("¿Querés entregar alguna tarea ahora? (Escribí el título o Enter para volver): ").strip()
+                                    
+                                    if opcion in lista_titulos:
+                                        path = input(f"📂 Ruta del archivo para '{opcion}': ").strip()
+                                        if os.path.exists(path):
+                                            size = os.path.getsize(path)
+                                            # Aplicamos el límite de 20MB ($20 \times 1024 \times 1024$ bytes)
+                                            if size > 20 * 1024 * 1024:
+                                                print("❌ Error: El archivo supera los 20MB permitidos.")
+                                            else:
+                                                fname = f"{opcion.replace(' ', '_')}_{os.path.basename(path)}"
+                                                sock.send(f"UPLOAD|{fname}|{size}".encode())
+                                                
+                                                if res_q.get() == "FILE_READY":
+                                                    print(f"🚀 Subiendo entrega...")
+                                                    with open(path, "rb") as f:
+                                                        sock.sendall(f.read())
+                                                    print(f"[S] {res_q.get()}") # Confirmación UPLOAD_OK
+                                        else:
+                                            print("❌ Archivo no encontrado.")
+                                else:
+                                    print("\n✅ No hay tareas pendientes en esta sala.")
             elif opc == "4": break
     sock.close()
 
