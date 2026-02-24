@@ -121,8 +121,11 @@ async def main():
     loop = asyncio.get_running_loop()
     loop.add_reader(parent_conn.fileno(), handle_auth_response, parent_conn)
 
-    server = await asyncio.start_server(lambda r, w: handle_client(r, w, parent_conn), "127.0.0.1", 5000)
-    log("SERVER", f"Escuchando conexiones en 127.0.0.1:5000")
+    server = await asyncio.start_server(
+    lambda r, w: handle_client(r, w, parent_conn), 
+    os.getenv("SERVER_HOST", "0.0.0.0"), 
+    int(os.getenv("SERVER_PORT", 5000)))
+    log("SERVER", f"Escuchando conexiones en {os.getenv('SERVER_HOST', '0.0.0.0')}:{os.getenv('SERVER_PORT', 5000)}")
 
     async with server:
         await server.serve_forever()

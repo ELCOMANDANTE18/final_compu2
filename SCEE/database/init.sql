@@ -30,23 +30,24 @@ CREATE TABLE IF NOT EXISTS miembros_sala (
 ) ENGINE=InnoDB;
 
 -- 4. Mensajes (Persistencia de la comunicación)
+-- Tabla de Mensajes: Cambiamos id_emisor por id_usuario
 CREATE TABLE IF NOT EXISTS mensajes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     id_sala INT,
-    id_emisor INT,
+    id_usuario INT, -- <--- Nombre que busca el servidor
     contenido TEXT NOT NULL,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (id_sala) REFERENCES salas(id) ON DELETE CASCADE,
-    FOREIGN KEY (id_emisor) REFERENCES usuarios(id) ON DELETE CASCADE
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 5. Tareas/Documentos (Lo que usará Celery)
+-- Tabla de Tareas: Cambiamos fecha_vencimiento por fecha_entrega
 CREATE TABLE IF NOT EXISTS tareas (
     id INT AUTO_INCREMENT PRIMARY KEY,
     id_sala INT,
     titulo VARCHAR(150) NOT NULL,
     descripcion TEXT,
-    fecha_vencimiento DATETIME,
+    fecha_entrega DATETIME, -- <--- Nombre que busca el servidor
     estado ENUM('pendiente', 'completada', 'vencida') DEFAULT 'pendiente',
     FOREIGN KEY (id_sala) REFERENCES salas(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

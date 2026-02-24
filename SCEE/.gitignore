@@ -1,34 +1,32 @@
-# Entorno Virtual
+# === Datos de Base de Datos (Muy Importante) ===
+# Ignora toda la carpeta de datos binarios de MariaDB/MySQL
+db_data/
+**/db_data/*
+*.aria
+*.sys
+ib_buffer_pool
+ib_logfile*
+ibdata*
+multi-master.info
+mysql_upgrade_info
+
+# === Entorno Virtual ===
 venv/
-ENV/
 env/
 .venv/
 
-# Python Cache
+# === Python Cache ===
 **/__pycache__/
 *.py[cod]
-*$py.class
 
-# Variables de Entorno (¡MUY IMPORTANTE!)
+# === Variables de Entorno ===
 .env
 .env.local
 
-# Bases de datos locales (si usas SQLite para pruebas rápidas)
-*.sqlite3
+# === Notas Personales ===
+src/notas*.md
+todo.txt
 
-# Archivos de configuración de IDEs (Opcional pero recomendado)
+# === IDEs ===
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# Logs del sistema
-*.log
-
-
-# Notas para mi
-
-src/notas.md
-src/notas2.md
-src/notas3.md
-src/notas4.md

@@ -1,16 +1,17 @@
+import os
 import time
 import datetime
 from celery import Celery
 
-# 1. Configuración de la instancia de Celery
-# 'redis://localhost:6379/0' indica que usamos la base de datos 0 de Redis como broker.
+# --- CAMBIO CLAVE: Usar la variable de entorno REDIS_URL ---
+redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
 app = Celery(
     'scee_tasks',
-    broker='redis://localhost:6379/0',
-    backend='redis://localhost:6379/0'
+    broker=redis_url,
+    backend=redis_url
 )
 
-# 2. Definición de la tarea genérica (notify_task)
 @app.task(name="task.notify_task")
 def notify_task(usuario, detalle):
     """

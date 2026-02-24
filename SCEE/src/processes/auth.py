@@ -73,13 +73,18 @@ async def auth_process_loop(pipe_conn):
                     success, msg_or_id = await db.register(user, req.get("pass"), req.get("rol"))
                     if success:
                         pipe_conn.send({
-                            "status": "OK", "type": "AUTH_RES", 
-                            "user_requested": user, "role": req.get("rol"), "user_id": msg_or_id
+                            "status": "OK", 
+                            "type": "REGISTER_RES", # <--- CAMBIADO PARA EL 201
+                            "user_requested": user, 
+                            "role": req.get("rol"), 
+                            "user_id": msg_or_id
                         })
                     else:
                         pipe_conn.send({
-                            "status": "ERROR", "type": "AUTH_RES", 
-                            "message": msg_or_id, "user_requested": user
+                            "status": "ERROR", 
+                            "type": "REGISTER_RES", # <--- CAMBIADO
+                            "message": msg_or_id, 
+                            "user_requested": user
                         })
 
                 elif action == "CREATE_SALA":
