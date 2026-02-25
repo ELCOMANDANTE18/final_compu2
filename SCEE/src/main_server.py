@@ -77,6 +77,30 @@ async def handle_client(reader, writer, pipe_conn):
                 elif m == "GET_TASKS":
                     log("CMD", f"[{u}] Solicitando lista de tareas")
                     pipe_conn.send({"type": "GET_TASKS", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "user": u})
+
+                elif m.startswith("CREATE_SALA|"):
+                    if sess['rol'] == 'profesor':
+                        partes = m.split("|")
+                        # partes[1] es nombre, partes[2] es descripción
+                        log("CMD", f"[{u}] Creando sala: {partes[1]}")
+                        pipe_conn.send({
+                            "type": "CREATE_SALA", 
+                            "nombre": partes[1], 
+                            "descripcion": partes[2], 
+                            "id_user": sess['user_id'], 
+                            "user": u
+                        })
+                    else:
+                        log("AUTH_WARN", f"[{u}] Intento no autorizado de crear sala")
+                        writer.write(b"DATA_RES|ERROR|Solo profesores pueden crear salas\n")
+
+
+                elif m == "LIST_USERS":
+                    # Obtenemos los nombres de las sesiones activas
+                    usuarios_online = [sess['username'] for sess in active_sessions.values()]
+                    data_users = ",".join(usuarios_online) if usuarios_online else "VACIO"
+                    log("CMD", f"[{u}] Consultando usuarios activos")
+                    writer.write(f"LISTA|{data_users}\n".encode())    
                 
                 elif m.startswith("LIST_"):
                     log("CMD", f"[{u}] Solicitando listado: {m}")

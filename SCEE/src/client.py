@@ -28,22 +28,31 @@ def listen(sock):
             if not data: break
             for line in data.split('\n'):
                 if line.startswith("CHAT|"):
-                    _, u, m = line.split("|")
-                    sys.stdout.write(f"\r[📩 {u}]: {m}\nSala >> ")
-                    sys.stdout.flush()
-                else: res_q.put(line)
-        except: break
+                    partes = line.split("|")
+                    if len(partes) >= 3:
+                        _, u, m = partes[0], partes[1], "|".join(partes[2:])
+                        sys.stdout.write(f"\r[📩 {u}]: {m}\nSala >> ")
+                        sys.stdout.flush()
+                else: 
+                    res_q.put(line)
+        except: 
+            break
 
 def menu_principal(rol):
+    """Muestra el menú según el rol del usuario."""
     print(f"\n=== SCEE PANEL ({rol.upper()}) ===")
-    print("1. Buscar salas\n2. Mis salas (Entrar)\n3. Usuarios activos\n4. Salir")
+    print("1. Buscar salas")
+    print("2. Mis salas (Entrar)")
+    print("3. Usuarios activos")
+    print("4. Salir")
+    if rol == "profesor":
+        print("5. Crear sala") # Opción exclusiva para profesores
     return input("Seleccioná: ")
 
 def main():
     os.system('clear') if os.name == 'posix' else os.system('cls')
     print_banner()
     
-    # Configuración de argumentos mejorada
     p = argparse.ArgumentParser(description="Cliente SCEE - Mendoza")
     p.add_argument("-u", required=True, help="Nombre de usuario")
     p.add_argument("-p", required=True, help="Contraseña")
@@ -56,7 +65,6 @@ def main():
     try:
         sock.connect(("127.0.0.1", 5000))
         
-        # Determinamos si es LOGIN o REGISTER
         cmd = "REGISTER" if args.register else "LOGIN"
         sock.send(f"{cmd}|{args.u}|{args.p}|{args.r}".encode())
         
@@ -73,12 +81,14 @@ def main():
             
             while True:
                 opc = menu_principal(mi_rol)
+                
                 if opc in ["1", "2"]:
                     sock.send(b"LIST_AVAILABLE" if opc == "1" else b"LIST_MY_SALAS")
                     resp = res_q.get().split("|")
                     if resp[1] != "VACIO":
                         for s in resp[1].split(","): 
-                            print(f" ID: {s.split(':')[0]} | {s.split(':')[1]}")
+                            if ":" in s:
+                                print(f" ID: {s.split(':')[0]} | {s.split(':')[1]}")
                         
                         tid = input("\nID para entrar (o Enter para volver): ")
                         if not tid or not tid.isdigit(): continue
@@ -96,16 +106,18 @@ def main():
                             sock.send(b"GET_TASKS")
                             t_check = res_q.get().split("|")
                             if t_check[0] == "TASKS_LIST" and t_check[1] != "VACIO":
-                                num = len(t_check) - 1
+                                num = len(t_check[1:])
                                 print(f"\n🔔 AVISO: Tenés {num} tareas pendientes. Usá /tareas para verlas.")
 
                             print(f"\n[!] Comandos: /tareas, {'' if mi_rol != 'profesor' else '/nueva, '}ENTER para salir.")
+                            
                             while True:
                                 txt = input("Sala >> ")
                                 if not txt.strip(): 
                                     sock.send(b"LEAVE_ROOM")
                                     res_q.get()
                                     break
+                                
                                 elif txt == "/tareas":
                                     sock.send(b"GET_TASKS")
                                     t_res = res_q.get().split("|")
@@ -117,19 +129,66 @@ def main():
                                                 if len(partes_t) >= 3:
                                                     print(f"📌 {partes_t[0]}\n   📅 Entrega: {partes_t[-1]}\n   📝 Desc: {':'.join(partes_t[1:-1])}\n")
                                             except: continue
-                                    else: print("Sin tareas.")
+                                    else: 
+                                        print("Sin tareas.")
+                                
+                                elif txt == "/nueva" and mi_rol == "profesor":
+                                    nombre_n = ""
+                                    while not nombre_n.strip():
+                                        nombre_n = input("Nombre de la tarea (obligatorio): ")
+                                    desc_n = input("Descripción de la tarea: ")
+                                    fecha_n = input("Fecha de entrega: ")
+                                    sock.send(f"CREATE_TASK|{nombre_n}|{desc_n}|{fecha_n}".encode())
+                                    res_q.get()
+                                    print("[S] Tarea creada.")
+
                                 else: 
                                     sock.send(f"SEND_MSG|{txt}".encode())
                                     res_q.get()
+
+                elif opc == "3":
+                    sock.send(b"LIST_USERS")
+                    resp = res_q.get().split("|")
+                    if resp[1] != "VACIO":
+                        print("\n--- USUARIOS CONECTADOS ---")
+                        for user in resp[1].split(","):
+                            print(f" • {user}")
+                    else:
+                        print("\n[!] No hay otros usuarios conectados.")
+
+                elif opc == "5" and mi_rol == "profesor":
+                    print("\n--- NUEVA SALA (Escribe '0' para cancelar) ---")
+                    nombre = input("Nombre de la sala: ")
+                    
+                    if nombre.strip() == "0":
+                        print("[!] Operación cancelada.")
+                        continue
+                        
+                    while not nombre.strip():
+                        nombre = input("El nombre es obligatorio (o '0' para cancelar): ")
+                        if nombre.strip() == "0": break
+                    
+                    if nombre.strip() == "0": continue
+                    
+                    desc = input("Descripción (opcional): ")
+                    sock.send(f"CREATE_SALA|{nombre}|{desc}".encode())
+                    
+                    resp = res_q.get().split("|")
+                    if resp[1] == "OK":
+                        print(f"\n[S] Sala '{nombre}' creada con éxito.")
+                    else:
+                        print(f"\n[!] Error: {resp[-1]}")
+
                 elif opc == "4": 
                     break
         else:
-            # Manejo de errores (ej. usuario ya existe o credenciales mal)
-            msg_error = auth_data.split("|")[-1] if "|" in auth_data else auth_data
-            print(f"[!] Error de acceso: {msg_error}")
+            msg_err = auth_data.split("|")[-1] if "|" in auth_data else auth_data
+            print(f"[!] Error de acceso: {msg_err}")
 
     except ConnectionRefusedError:
-        print("[!] Error: No se pudo conectar con el servidor SCEE. ¿Está encendido?")
+        print("[!] Error: No se pudo conectar con el servidor SCEE.")
+    except Exception as e:
+        print(f"[!] Error inesperado: {e}")
     finally:
         sock.close()
 
