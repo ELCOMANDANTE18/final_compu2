@@ -60,16 +60,64 @@ async def auth_process_loop(pipe_conn):
                     else:
                         pipe_conn.send({"status": "ERROR", "type": "DATA_RES", "message": "No existe", "user_requested": user})
 
-                elif action.startswith("LIST_"):
+                elif action in ["LIST_AVAILABLE", "LIST_MY_SALAS"]:
                     data = await db.list_rooms(u_id, action)
                     pipe_conn.send({"status": "OK", "type": "LISTA", "data": data, "user_requested": user})
                 
                 elif action == "SAVE_MSG":
                     await db.save_message(req.get("id_sala"), u_id, req.get("msg"))
 
+                # ... (dentro del bucle de auth.py)
+                elif action == "CREATE_TASK":
+                    # Usamos la lógica de tu tabla 'tareas' de MariaDB
+                    async with db.conn.cursor() as cur:
+                        await cur.execute(
+                            "INSERT INTO tareas (id_sala, titulo, descripcion, fecha_entrega) VALUES (%s, %s, %s, %s)",
+                            (int(req.get("id_sala")), req.get("titulo"), req.get("descripcion"), req.get("fecha"))
+                        )
+                    pipe_conn.send({"status": "OK", "type": "DATA_RES", "user_requested": user})
+
                 elif action == "GET_TASKS":
-                    data = await db.get_tasks(req.get("id_sala"))
+                    if req.get("rol").lower() == "profesor":
+                        # Al profe le mandamos todas las tareas de la sala para que vea qué hay
+                        async with db.conn.cursor() as cur:
+                            await cur.execute("SELECT id, titulo, descripcion, fecha_entrega FROM tareas WHERE id_sala = %s", (int(req.get("id_sala")),))
+                            res = await cur.fetchall()
+                            data = "|".join([f"{r[0]}§{r[1]}§{r[2]}§{r[3]}" for r in res]) if res else "VACIO"
+                    else:
+                        # Al alumno le mandamos solo las que NO entregó
+                        data = await db.get_tasks(req.get("id_sala"), req.get("id_user"))
+                    
                     pipe_conn.send({"status": "OK", "type": "TASKS_LIST", "data": data, "user_requested": user})
+# ...
+                
+                elif action == "SAVE_SUBMISSION":
+                    # Mapeo de parámetros para la DB
+                    await db.save_submission(
+                        req.get("tp_id"), 
+                        req.get("id_user"), 
+                        req.get("content")
+                    )
+                    pipe_conn.send({
+                        "status": "OK", 
+                        "type": "DATA_RES", 
+                        "user_requested": req.get("user")
+                    })   
+
+                elif action == "LIST_SUBMISSIONS":
+                    data = await db.list_submissions(req.get("id_sala"))
+                    pipe_conn.send({"status": "OK", "type": "SUBMISSIONS_LIST", "data": data, "user_requested": user})
+
+                elif action == "GRADE_SUBMISSION":
+                    await db.grade_submission(req.get("s_id"), req.get("grade"))
+                    pipe_conn.send({"status": "OK", "type": "DATA_RES", "user_requested": user})
+                
+                elif action == "GET_GRADES":
+                    data = await db.get_grades(u_id)
+                    pipe_conn.send({
+                        "status": "OK", "type": "GRADES_LIST", 
+                        "data": data, "user_requested": user
+                    })        
 
             except Exception as e:
                 print(f"[WORKER ERROR] {e}")
