@@ -13,10 +13,18 @@ env/
 .env
 .env.local
 
-# Bases de datos locales (si usas SQLite para pruebas rápidas)
+# Bases de datos locales
 *.sqlite3
 
-# Archivos de configuración de IDEs (Opcional pero recomendado)
+# Celery y Redis
+# Archivo de persistencia del Beat y archivos de procesos
+celerybeat-schedule
+celerybeat-schedule.db
+celerybeat-schedule.bak
+celerybeat-schedule.dat
+celerybeat-schedule.dir
+
+# Archivos de configuración de IDEs
 .vscode/
 .idea/
 *.swp
@@ -25,9 +33,7 @@ env/
 # Logs del sistema
 *.log
 
-
-# Notas para mi
-
+# Notas personales
 src/notas.md
 src/notas2.md
 src/notas3.md
