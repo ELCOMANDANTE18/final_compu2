@@ -6,13 +6,27 @@ async def auth_process_loop(pipe_conn):
     """Bucle principal que escucha el Pipe y despacha a la DB."""
     
     # IMPORT LOCAL: Esto rompe la dependencia circular
-    from src.main_server import DatabaseManager
+    # Asegúrate de que 'main_server.py' esté en la misma carpeta o en el PYTHONPATH
+    from main_server import DatabaseManager
     
     db = DatabaseManager()
-    await db.connect()
+
+    # --- NUEVO: Bucle de reintento para Mendoza 🍇 ---
+    # Esto evita que el contenedor falle si MariaDB aún está arrancando
+    while True:
+        try:
+            await db.connect()
+            print("[AUTH] Conexión exitosa con MariaDB.")
+            break
+        except Exception as e:
+            print(f"[AUTH] Esperando a MariaDB... (Reintentando en 2s): {e}")
+            await asyncio.sleep(2)
+    # ------------------------------------------------
 
     while True:
+        # Pequeña espera para no saturar el CPU
         await asyncio.sleep(0.01)
+        
         if pipe_conn.poll():
             req = pipe_conn.recv()
             action = req.get("type")
@@ -67,9 +81,7 @@ async def auth_process_loop(pipe_conn):
                 elif action == "SAVE_MSG":
                     await db.save_message(req.get("id_sala"), u_id, req.get("msg"))
 
-                # ... (dentro del bucle de auth.py)
                 elif action == "CREATE_TASK":
-                    # Usamos la lógica de tu tabla 'tareas' de MariaDB
                     async with db.conn.cursor() as cur:
                         await cur.execute(
                             "INSERT INTO tareas (id_sala, titulo, descripcion, fecha_entrega) VALUES (%s, %s, %s, %s)",
@@ -79,20 +91,16 @@ async def auth_process_loop(pipe_conn):
 
                 elif action == "GET_TASKS":
                     if req.get("rol").lower() == "profesor":
-                        # Al profe le mandamos todas las tareas de la sala para que vea qué hay
                         async with db.conn.cursor() as cur:
                             await cur.execute("SELECT id, titulo, descripcion, fecha_entrega FROM tareas WHERE id_sala = %s", (int(req.get("id_sala")),))
                             res = await cur.fetchall()
                             data = "|".join([f"{r[0]}§{r[1]}§{r[2]}§{r[3]}" for r in res]) if res else "VACIO"
                     else:
-                        # Al alumno le mandamos solo las que NO entregó
                         data = await db.get_tasks(req.get("id_sala"), req.get("id_user"))
                     
                     pipe_conn.send({"status": "OK", "type": "TASKS_LIST", "data": data, "user_requested": user})
-# ...
                 
                 elif action == "SAVE_SUBMISSION":
-                    # Mapeo de parámetros para la DB
                     await db.save_submission(
                         req.get("tp_id"), 
                         req.get("id_user"), 
