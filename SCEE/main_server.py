@@ -316,8 +316,8 @@ async def main():
     # 1. Configuración de Argumentos (Prioridad: Comando > .env > Default)
     parser = argparse.ArgumentParser(description="Servidor SCEE - Mendoza")
     parser.add_argument("--host", 
-                        default=os.getenv("SERVER_HOST", "::"), 
-                        help="Dirección de escucha (usar '::' para IPv4 e IPv6)")
+                    default=os.getenv("SERVER_HOST", "0.0.0.0"), 
+                    help="Dirección de escucha")
     parser.add_argument("--port", 
                         type=int, 
                         default=int(os.getenv("SERVER_PORT", 5000)), 

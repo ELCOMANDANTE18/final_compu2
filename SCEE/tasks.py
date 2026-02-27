@@ -5,7 +5,7 @@ import asyncio
 
 # Importamos tu lógica de persistencia
 # En tasks.py (línea 8 aprox), cambialo a esto:
-from src.main_server import DatabaseManager
+from main_server import DatabaseManager
 
 # 1. Cargamos el .env ANTES de cualquier otra cosa
 load_dotenv()
