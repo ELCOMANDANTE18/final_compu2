@@ -1,59 +1,68 @@
 import os
+import asyncio
 from celery import Celery
 from dotenv import load_dotenv
-import asyncio
+from datetime import datetime
 
-# Importamos tu lógica de persistencia
-# En tasks.py (línea 8 aprox), cambialo a esto:
+# Importamos tu lógica de persistencia (Ruta raíz para Docker)
 from main_server import DatabaseManager
 
-# 1. Cargamos el .env ANTES de cualquier otra cosa
 load_dotenv()
 
-# 2. Obtenemos la URL y ponemos un "fallback" por si el .env falla
-broker_url = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+app = Celery('scee_tasks',
+             broker=os.getenv("CELERY_BROKER_URL"),
+             backend=os.getenv("CELERY_RESULT_BACKEND"))
 
-# 3. Inicializamos la App con la configuración explícita
-app = Celery('scee_tasks', 
-             broker=broker_url,
-             backend=result_backend)
-
-# ... resto de tu código (configuración de Beat y tareas)
-
-# Configuración del Beat (Programación automática)
+# --- CONFIGURACIÓN DE LA AGENDA (Faltaba esto) ---
 app.conf.beat_schedule = {
     'revisar-vencimientos-cada-minuto': {
         'task': 'tasks.check_task_deadlines',
-        'schedule': 60.0, # Segundos (podes usar crontab para horas específicas)
+        'schedule': 60.0, # Se ejecuta cada minuto
     },
 }
 app.conf.timezone = 'America/Argentina/Mendoza'
 
-@app.task
-def check_task_deadlines():
-    """Busca tareas próximas a vencer en MariaDB."""
-    loop = asyncio.get_event_loop()
-    db = DatabaseManager()
-    
-    async def run_check():
-        await db.connect()
+db = DatabaseManager()
+
+async def run_check():
+    """Lógica de verificación de vencimientos con reintento inicial."""
+    # Bucle de espera para que el worker no muera si la DB está arrancando
+    while True:
+        try:
+            await db.connect()
+            break
+        except Exception:
+            print("⏳ [WORKER TAREAS] Esperando a MariaDB para revisar vencimientos...")
+            await asyncio.sleep(3)
+
+    try:
         async with db.conn.cursor() as cur:
-            # Seleccionamos tareas que vencen en las próximas 24hs
+            # Query para detectar tareas que vencieron en el último minuto
             query = """
-                SELECT t.titulo, t.fecha_entrega, s.nombre 
-                FROM tareas t
+                SELECT t.titulo, s.nombre 
+                FROM tareas t 
                 JOIN salas s ON t.id_sala = s.id
-                WHERE t.fecha_entrega BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 1 DAY)
+                WHERE t.fecha_entrega <= NOW() 
+                AND t.fecha_entrega > DATE_SUB(NOW(), INTERVAL 1 MINUTE)
             """
             await cur.execute(query)
-            return await cur.fetchall()
+            vencidas = await cur.fetchall()
+            
+            if vencidas:
+                for t, s in vencidas:
+                    print(f"⚠️  [ALERTA] La tarea '{t}' de la sala '{s}' ha VENCIDO ahora.")
+                return f"Alertas enviadas: {len(vencidas)}"
+            else:
+                print(f"✅ [CELERY BEAT] {datetime.now().strftime('%H:%M')} - Sincronizado. Sin vencimientos.")
+                return "OK"
+    except Exception as e:
+        print(f"❌ [WORKER ERROR] {e}")
+    finally:
+        if db.conn:
+            db.conn.close()
 
-    vencimientos = loop.run_until_complete(run_check())
-    
-    if vencimientos:
-        print(f"\n📢 [CELERY BEAT] Se encontraron {len(vencimientos)} vencimientos próximos:")
-        for v in vencimientos:
-            print(f"   - Tarea: {v[0]} | Sala: {v[2]} | Vence: {v[1]}")
-    else:
-        print("✅ [CELERY BEAT] No hay vencimientos próximos.")
+@app.task(name="tasks.check_task_deadlines")
+def check_task_deadlines():
+    """Punto de entrada para Celery."""
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(run_check())

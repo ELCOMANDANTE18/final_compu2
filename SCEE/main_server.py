@@ -1,4 +1,4 @@
-import asyncio, os, datetime, aiomysql,argparse
+import asyncio, os, datetime, aiomysql, argparse
 from multiprocessing import Process, Pipe
 from dotenv import load_dotenv
 
@@ -7,7 +7,7 @@ from src.processes.auth import start_auth_process
 
 load_dotenv()
 
-# --- CLASE DE PERSISTENCIA (Movida desde database_logic.py) ---
+# --- CLASE DE PERSISTENCIA ---
 class DatabaseManager:
     def __init__(self):
         self.conn = None
@@ -46,9 +46,7 @@ class DatabaseManager:
             return True
 
     async def save_submission(self, tp_id, alumno_id, content):
-        """Guarda la entrega en la tabla 'entregas' usando tus nombres de columna."""
         async with self.conn.cursor() as cur:
-            # Usamos id_tp e id_alumno según tu 'describe entregas'
             query = """
                 INSERT INTO entregas (id_tp, id_alumno, contenido, estado) 
                 VALUES (%s, %s, %s, 'entregado')
@@ -57,7 +55,6 @@ class DatabaseManager:
             return True
 
     async def get_tasks(self, room_id, user_id):
-        """Busca tareas de la sala que el usuario NO haya entregado todavía."""
         async with self.conn.cursor() as cur:
             query = """
                 SELECT t.id, t.titulo, t.descripcion, DATE_FORMAT(t.fecha_entrega, '%%Y-%%m-%%d %%H:%%i')
@@ -90,10 +87,8 @@ class DatabaseManager:
             await cur.execute(q, (int(user_id),))
             r_list = await cur.fetchall()
             return ",".join([f"{r[0]}:{r[1]}" for r in r_list]) if r_list else "VACIO"
-        
 
     async def list_submissions(self, room_id):
-        """Lista todas las entregas pendientes de corregir en una sala."""
         async with self.conn.cursor() as cur:
             query = """
                 SELECT e.id, u.username, t.titulo, e.contenido 
@@ -104,19 +99,17 @@ class DatabaseManager:
             """
             await cur.execute(query, (int(room_id),))
             res = await cur.fetchall()
-            # Formato: id§alumno§tarea§contenido
             return "|".join([f"{r[0]}§{r[1]}§{r[2]}§{r[3]}" for r in res]) if res else "VACIO"
 
     async def grade_submission(self, submission_id, grade):
-        """Actualiza el estado y la calificación de una entrega."""
         async with self.conn.cursor() as cur:
             await cur.execute(
                 "UPDATE entregas SET estado = 'corregido', calificacion = %s WHERE id = %s",
                 (int(grade), int(submission_id))
             )
             return True
+
     async def get_grades(self, user_id):
-        """Recupera las tareas corregidas y sus notas para un alumno."""
         async with self.conn.cursor() as cur:
             query = """
                 SELECT t.titulo, e.calificacion, DATE_FORMAT(e.fecha_entrega, '%%d/%%m %%H:%%i')
@@ -126,15 +119,12 @@ class DatabaseManager:
             """
             await cur.execute(query, (int(user_id),))
             res = await cur.fetchall()
-            # Formato: Titulo§Nota§Fecha
             return "|".join([f"{r[0]}§{r[1]}§{r[2]}" for r in res]) if res else "VACIO"    
-
 
 # --- LÓGICA DEL SERVIDOR ---
 pending_auths, active_sessions = {}, {}
 
 def log(tag, msg):
-    """Imprime logs con timestamp para monitoreo en terminal."""
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [{tag}] {msg}")
 
 async def broadcast(message, room_id, sender_writer, sender_name):
@@ -147,7 +137,6 @@ async def broadcast(message, room_id, sender_writer, sender_name):
             except: continue
 
 def handle_auth_response(pipe_conn):
-    """Recibe respuestas del worker auth.py y responde al cliente."""
     if pipe_conn.poll():
         res = pipe_conn.recv()
         user, status, tipo = res.get("user_requested"), res.get("status"), res.get("type")
@@ -187,97 +176,40 @@ async def handle_client(reader, writer, pipe_conn):
             if sess:
                 u = sess['username']
                 if m.startswith("JOIN|"):
-                    log("CMD", f"[{u}] Uniéndose a sala {m.split('|')[1]}")
                     pipe_conn.send({"type": "JOIN_SALA", "id_sala": m.split("|")[1], "id_user": sess['user_id'], "user": u})
-                
                 elif m.startswith("SEND_MSG|"):
-                    log("CHAT", f"[{u}] Mensaje en sala {sess['id_sala']}")
                     pipe_conn.send({"type": "SAVE_MSG", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "msg": m.split("|")[1]})
                     await broadcast(m.split("|")[1], sess['id_sala'], writer, u)
                     writer.write(b"DATA_RES|OK\n")
-                
-                
-
                 elif m.startswith("CREATE_SALA|"):
                     if sess['rol'] == 'profesor':
                         p = m.split("|")
-                        log("CMD", f"[{u}] Creando sala: {p[1]}")
                         pipe_conn.send({"type": "CREATE_SALA", "nombre": p[1], "descripcion": p[2], "id_user": sess['user_id'], "user": u})
                     else:
                         writer.write(b"DATA_RES|ERROR|Solo profesores pueden crear salas\n")
-
                 elif m == "LIST_USERS":
-                    # Lógica local del servidor (no requiere DB)
                     users = ",".join([s['username'] for s in active_sessions.values()])
                     writer.write(f"LISTA|{users if users else 'VACIO'}\n".encode())
-                
                 elif m in ["LIST_AVAILABLE", "LIST_MY_SALAS"]:
-                    log("CMD", f"[{u}] Listado: {m}")
                     pipe_conn.send({"type": m, "id_user": sess['user_id'], "user": u})
-
-
-                # ... (dentro de handle_client en main_server.py)
                 elif m.startswith("CREAR_TAREA|"):
                     if sess['rol'].lower() == 'profesor':
                         p = m.split("|")
-                        log("CMD", f"[{u}] Solicitando creación de tarea: {p[1]}")
-                        # Delegamos al worker auth.py
-                        pipe_conn.send({
-                            "type": "CREATE_TASK",
-                            "id_sala": sess['id_sala'],
-                            "titulo": p[1],
-                            "descripcion": p[2],
-                            "fecha": p[3],
-                            "user": u
-                        })
-                    else:
-                        writer.write(b"DATA_RES|ERROR|Acceso denegado\n")
-
+                        pipe_conn.send({"type": "CREATE_TASK", "id_sala": sess['id_sala'], "titulo": p[1], "descripcion": p[2], "fecha": p[3], "user": u})
                 elif m == "GET_TASKS":
-                    log("CMD", f"[{u}] Consultando tareas (Rol: {sess['rol']})")
-                    pipe_conn.send({
-                        "type": "GET_TASKS", 
-                        "id_sala": sess['id_sala'], 
-                        "id_user": sess['user_id'], 
-                        "rol": sess['rol'], # Enviamos el rol para filtrar
-                        "user": u
-                    })
-                
+                    pipe_conn.send({"type": "GET_TASKS", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "rol": sess['rol'], "user": u})
                 elif m == "GET_GRADES":
-                    log("CMD", f"[{u}] Consultando notas")
                     pipe_conn.send({"type": "GET_GRADES", "id_user": sess['user_id'], "user": u})    
-# ...
                 elif m == "LIST_SUBMISSIONS" and sess['rol'] == 'profesor':
-                    log("CMD", f"[{u}] Consultando entregas pendientes")
                     pipe_conn.send({"type": "LIST_SUBMISSIONS", "id_sala": sess['id_sala'], "user": u})
-
                 elif m.startswith("GRADE|") and sess['rol'] == 'profesor':
                     _, s_id, nota = m.split("|")
-                    log("CMD", f"[{u}] Calificando entrega {s_id} con nota {nota}")
                     pipe_conn.send({"type": "GRADE_SUBMISSION", "s_id": s_id, "grade": nota, "user": u})
-
                 elif m.startswith("SUBIR_ENTREGA|"):
-                    # Formato: SUBIR_ENTREGA|id_tp|contenido
                     partes = m.split("|", 2)
                     if len(partes) >= 3:
-                        tp_id = partes[1]
-                        contenido = partes[2]
-                        
-                        log("CMD", f"[{u}] Entregando TP {tp_id}")
-                        
-                        # FIX: Usamos sess['user_id'] en lugar de u_id
-                        pipe_conn.send({
-                            "type": "SAVE_SUBMISSION", 
-                            "tp_id": tp_id, 
-                            "id_user": sess['user_id'], 
-                            "content": contenido,
-                            "user": u
-                        })
-                    else:
-                        writer.write(b"ERROR|400|Formato de entrega invalido\n")  
-                
+                        pipe_conn.send({"type": "SAVE_SUBMISSION", "tp_id": partes[1], "id_user": sess['user_id'], "content": partes[2], "user": u})
                 elif m == "LEAVE_ROOM":
-                    log("ROOM", f"[{u}] Salió de la sala {sess['id_sala']}")
                     sess['id_sala'] = "Ninguna"
                     writer.write(b"DATA_RES|LEAVE\n")
                 
@@ -285,7 +217,6 @@ async def handle_client(reader, writer, pipe_conn):
             else:
                 p = m.split("|")
                 if len(p) >= 3:
-                    log("AUTH", f"Petición {p[0]} para: {p[1]}")
                     pending_auths[p[1]] = writer
                     pipe_conn.send({"type": p[0], "user": p[1], "pass": p[2], "rol": p[3] if len(p)>3 else "alumno"})
             
@@ -313,22 +244,14 @@ def print_banner():
     print("="*42 + "\n SCEE - Sede Mendoza 🍇📍\n" + "="*42)
 
 async def main():
-    # 1. Configuración de Argumentos (Prioridad: Comando > .env > Default)
     parser = argparse.ArgumentParser(description="Servidor SCEE - Mendoza")
-    parser.add_argument("--host", 
-                    default=os.getenv("SERVER_HOST", "0.0.0.0"), 
-                    help="Dirección de escucha")
-    parser.add_argument("--port", 
-                        type=int, 
-                        default=int(os.getenv("SERVER_PORT", 5000)), 
-                        help="Puerto del servidor")
-    
+    parser.add_argument("--port", type=int, default=int(os.getenv("SERVER_PORT", 5000)), help="Puerto del servidor")
     args = parser.parse_args()
 
     os.system('clear' if os.name == 'posix' else 'cls')
     print_banner()
 
-    # 2. Inicialización de Procesos e IPC (Mantiene la arquitectura que le gustó al profesor)
+    # IPC y Proceso Worker (Mantiene la arquitectura original)
     parent_conn, child_conn = Pipe()
     db_proc = Process(target=start_auth_process, args=(child_conn,), daemon=True)
     db_proc.start()
@@ -337,16 +260,16 @@ async def main():
     loop = asyncio.get_running_loop()
     loop.add_reader(parent_conn.fileno(), handle_auth_response, parent_conn)
 
-    # 3. Inicio del Servidor con soporte IPv6/IPv4
-    # Al usar host="::", asyncio intenta habilitar dual-stack por defecto en la mayoría de sistemas Linux.
+    # --- NUEVO: Inicio del Servidor con soporte Dual Stack real ---
     try:
+        # Al usar host=None, el servidor escucha en TODAS las interfaces (IPv4 e IPv6)
         server = await asyncio.start_server(
             lambda r, w: handle_client(r, w, parent_conn), 
-            host=args.host, 
+            host=None, 
             port=args.port,
             reuse_address=True
         )
-        log("SERVER", f"Escuchando en {args.host}:{args.port} (Soporte IPv4/IPv6 habilitado)")
+        log("SERVER", f"Escuchando en puerto {args.port} (MODO DUAL STACK IPv4/IPv6)")
     except Exception as e:
         log("ERROR", f"No se pudo iniciar el servidor: {e}")
         return

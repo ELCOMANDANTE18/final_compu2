@@ -66,7 +66,7 @@ def main():
     p.add_argument("--register", action="store_true", help="Registrar")
     
     args = p.parse_args()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     
     try:
         sock.connect((args.host, args.port))
