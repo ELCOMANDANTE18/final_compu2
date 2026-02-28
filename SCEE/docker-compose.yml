@@ -9,7 +9,7 @@ services:
       MYSQL_DATABASE: ${DB_NAME}
       TZ: America/Argentina/Mendoza
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - scee_network
 
@@ -24,7 +24,7 @@ services:
   server:
     build: .
     container_name: scee_server
-    command: python main_server.py
+    command: python src/main_server.py
     ports:
       - "5001:5001"
     depends_on:
@@ -39,7 +39,7 @@ services:
   worker:
     build: .
     container_name: scee_worker
-    command: celery -A tasks worker --loglevel=info
+    command: celery -A src.tasks worker --loglevel=info
     depends_on:
       - redis
       - db
@@ -52,7 +52,7 @@ services:
   beat:
     build: .
     container_name: scee_beat
-    command: celery -A tasks beat --loglevel=info
+    command: celery -A src.tasks beat --loglevel=info
     depends_on:
       - redis
     env_file: .env

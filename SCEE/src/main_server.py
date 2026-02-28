@@ -10,7 +10,7 @@ RED = "\033[91m"
 RESET = "\033[0m"
 
 # Importamos el punto de entrada del worker
-from src.processes.auth import start_auth_process
+from processes.auth import start_auth_process
 
 load_dotenv()
 
