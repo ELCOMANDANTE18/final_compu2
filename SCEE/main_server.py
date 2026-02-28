@@ -1,6 +1,13 @@
 import asyncio, os, datetime, aiomysql, argparse
 from multiprocessing import Process, Pipe
 from dotenv import load_dotenv
+import concurrent.futures
+
+# Colores para la terminal
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+RESET = "\033[0m"
 
 # Importamos el punto de entrada del worker
 from src.processes.auth import start_auth_process
@@ -120,6 +127,35 @@ class DatabaseManager:
             await cur.execute(query, (int(user_id),))
             res = await cur.fetchall()
             return "|".join([f"{r[0]}§{r[1]}§{r[2]}" for r in res]) if res else "VACIO"    
+        
+    # --- MÉTODOS DE BORRADO (CRUD COMPLETO) ---
+    async def delete_task(self, task_id):
+        async with self.conn.cursor() as cur:
+            # 1. Borrar notas de las entregas de esa tarea
+            await cur.execute("DELETE FROM entregas WHERE id_tp = %s", (int(task_id),))
+            # 2. Borrar la tarea
+            await cur.execute("DELETE FROM tareas WHERE id = %s", (int(task_id),))
+            return True
+
+    async def delete_submission(self, sub_id, user_id):
+        async with self.conn.cursor() as cur:
+            # Borrar la entrega específica del alumno
+            await cur.execute("DELETE FROM entregas WHERE id = %s AND id_alumno = %s", (int(sub_id), int(user_id)))
+            return True
+        
+    async def get_my_submissions(self, user_id, room_id):
+        async with self.conn.cursor() as cur:
+            query = """
+                SELECT e.id, t.titulo, DATE_FORMAT(e.fecha_entrega, '%%d/%%m %%H:%%i')
+                FROM entregas e
+                JOIN tareas t ON e.id_tp = t.id
+                WHERE e.id_alumno = %s AND t.id_sala = %s AND e.estado = 'entregado'
+            """
+            await cur.execute(query, (int(user_id), int(room_id)))
+            res = await cur.fetchall()
+            return "|".join([f"{r[0]}§{r[1]}§{r[2]}" for r in res]) if res else "VACIO"    
+
+
 
 # --- LÓGICA DEL SERVIDOR ---
 pending_auths, active_sessions = {}, {}
@@ -163,6 +199,7 @@ def handle_auth_response(pipe_conn):
 
 async def handle_client(reader, writer, pipe_conn):
     addr = writer.get_extra_info('peername')
+    loop = asyncio.get_running_loop() # <--- OBTENEMOS EL LOOP PARA EL EXECUTOR
     log("NETWORK", f"Nueva conexión: {addr}")
 
     try:
@@ -175,58 +212,128 @@ async def handle_client(reader, writer, pipe_conn):
             
             if sess:
                 u = sess['username']
-                if m.startswith("JOIN|"):
-                    pipe_conn.send({"type": "JOIN_SALA", "id_sala": m.split("|")[1], "id_user": sess['user_id'], "user": u})
+                
+                # --- MANEJO DE SALIDA LIMPIA ---
+                if m == "QUIT":
+                    log("NETWORK", f"{YELLOW}[{u}] Cerró sesión voluntariamente.{RESET}")
+                    break
+
+                elif m.startswith("JOIN|"):
+                    log("CMD", f"[{u}] Uniéndose a sala {m.split('|')[1]}")
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "JOIN_SALA", "id_sala": m.split("|")[1], "id_user": sess['user_id'], "user": u
+                    })
+
                 elif m.startswith("SEND_MSG|"):
-                    pipe_conn.send({"type": "SAVE_MSG", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "msg": m.split("|")[1]})
+                    # Enviamos a la DB sin bloquear el broadcast
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "SAVE_MSG", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "msg": m.split("|")[1]
+                    })
                     await broadcast(m.split("|")[1], sess['id_sala'], writer, u)
                     writer.write(b"DATA_RES|OK\n")
+
                 elif m.startswith("CREATE_SALA|"):
                     if sess['rol'] == 'profesor':
                         p = m.split("|")
-                        pipe_conn.send({"type": "CREATE_SALA", "nombre": p[1], "descripcion": p[2], "id_user": sess['user_id'], "user": u})
+                        await loop.run_in_executor(None, pipe_conn.send, {
+                            "type": "CREATE_SALA", "nombre": p[1], "descripcion": p[2], "id_user": sess['user_id'], "user": u
+                        })
                     else:
                         writer.write(b"DATA_RES|ERROR|Solo profesores pueden crear salas\n")
+
                 elif m == "LIST_USERS":
                     users = ",".join([s['username'] for s in active_sessions.values()])
                     writer.write(f"LISTA|{users if users else 'VACIO'}\n".encode())
+
                 elif m in ["LIST_AVAILABLE", "LIST_MY_SALAS"]:
-                    pipe_conn.send({"type": m, "id_user": sess['user_id'], "user": u})
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": m, "id_user": sess['user_id'], "user": u
+                    })
+
                 elif m.startswith("CREAR_TAREA|"):
                     if sess['rol'].lower() == 'profesor':
                         p = m.split("|")
-                        pipe_conn.send({"type": "CREATE_TASK", "id_sala": sess['id_sala'], "titulo": p[1], "descripcion": p[2], "fecha": p[3], "user": u})
+                        await loop.run_in_executor(None, pipe_conn.send, {
+                            "type": "CREATE_TASK", "id_sala": sess['id_sala'], "titulo": p[1], "descripcion": p[2], "fecha": p[3], "user": u
+                        })
+
                 elif m == "GET_TASKS":
-                    pipe_conn.send({"type": "GET_TASKS", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "rol": sess['rol'], "user": u})
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "GET_TASKS", "id_sala": sess['id_sala'], "id_user": sess['user_id'], "rol": sess['rol'], "user": u
+                    })
+
                 elif m == "GET_GRADES":
-                    pipe_conn.send({"type": "GET_GRADES", "id_user": sess['user_id'], "user": u})    
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "GET_GRADES", "id_user": sess['user_id'], "user": u
+                    })    
+
                 elif m == "LIST_SUBMISSIONS" and sess['rol'] == 'profesor':
-                    pipe_conn.send({"type": "LIST_SUBMISSIONS", "id_sala": sess['id_sala'], "user": u})
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "LIST_SUBMISSIONS", "id_sala": sess['id_sala'], "user": u
+                    })
+
                 elif m.startswith("GRADE|") and sess['rol'] == 'profesor':
                     _, s_id, nota = m.split("|")
-                    pipe_conn.send({"type": "GRADE_SUBMISSION", "s_id": s_id, "grade": nota, "user": u})
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "GRADE_SUBMISSION", "s_id": s_id, "grade": nota, "user": u
+                    })
+
                 elif m.startswith("SUBIR_ENTREGA|"):
                     partes = m.split("|", 2)
                     if len(partes) >= 3:
-                        pipe_conn.send({"type": "SAVE_SUBMISSION", "tp_id": partes[1], "id_user": sess['user_id'], "content": partes[2], "user": u})
+                        await loop.run_in_executor(None, pipe_conn.send, {
+                            "type": "SAVE_SUBMISSION", "tp_id": partes[1], "id_user": sess['user_id'], "content": partes[2], "user": u
+                        })
+
                 elif m == "LEAVE_ROOM":
                     sess['id_sala'] = "Ninguna"
                     writer.write(b"DATA_RES|LEAVE\n")
-                
+
+               # --- LÓGICA DE BORRADO CONSOLIDADA ---
+                elif m.startswith("BORRAR_TAREA|") and sess['rol'] == 'profesor':
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "DELETE_TASK", "id_tarea": m.split("|")[1], "user": u
+                })
+                elif m.startswith("BORRAR_ENTREGA|"):
+                # El alumno borra su propia entrega
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                    "type": "DELETE_SUBMISSION", "id_ent": m.split("|")[1], "id_user": sess['user_id'], "user": u
+                })
+                    
+                # --- AGREGAR ESTO EN handle_client (main_server.py) ---
+                elif m.startswith("GET_MY_SUBMISSIONS|"):
+                    # Extraemos el ID de la sala que manda el cliente
+                    id_sala = m.split("|")[1]
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "GET_MY_SUBMISSIONS", 
+                        "id_sala": id_sala, 
+                        "id_user": sess['user_id'], 
+                        "user": u
+                    })    
+                                
+                # Registramos quién espera la respuesta de la DB
                 pending_auths[u] = writer
+
             else:
+                # --- BLOQUE DE LOGIN / REGISTRO ---
                 p = m.split("|")
                 if len(p) >= 3:
                     pending_auths[p[1]] = writer
-                    pipe_conn.send({"type": p[0], "user": p[1], "pass": p[2], "rol": p[3] if len(p)>3 else "alumno"})
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": p[0], "user": p[1], "pass": p[2], "rol": p[3] if len(p)>3 else "alumno"
+                    })
             
-            await writer.drain()
+            await writer.drain() # <--- ASEGURA QUE EL BUFFER DE RED SE ENVÍE
+
     except Exception as e:
         log("ERROR", f"Error con {addr}: {e}")
     finally:
-        u = active_sessions.pop(writer, None)
-        if u: log("NETWORK", f"Desconectado: {u['username']}")
+        # Limpieza al desconectar
+        sess = active_sessions.pop(writer, None)
+        if sess: 
+            log("NETWORK", f"Desconectado: {sess['username']}")
         writer.close()
+        await writer.wait_closed() # Recomendado para cierre limpio en asyncio
 
 def print_banner():
     banner = r"""

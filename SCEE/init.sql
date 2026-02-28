@@ -202,9 +202,9 @@ CREATE TABLE `tareas` (
 LOCK TABLES `tareas` WRITE;
 /*!40000 ALTER TABLE `tareas` DISABLE KEYS */;
 INSERT INTO `tareas` VALUES
-(1,1,'TP Final - Computación II','Implementar Milestone 5: Docker y Celery.','2026-03-15 23:59:00'),
-(2,3,'Investigación: Sockets vs WebSockets','Documento comparativo de protocolos.','2026-03-10 18:00:00'),
-(3,1,'Implementar IPV6','Tiene que agregar que acepte conexiones ipv6','2026-02-27 08:03:18');
+(1,1,'TP Final - Computación II','Implementar Milestone 5: Docker y Celery.','2026-03-01 08:00:00'),
+(2,3,'Investigación: Sockets vs WebSockets','Documento comparativo de protocolos.','2026-03-01 08:00:00'),
+(3,1,'Implementar IPV6','Tiene que agregar que acepte conexiones ipv6','2026-02-28 12:40:00');
 /*!40000 ALTER TABLE `tareas` ENABLE KEYS */;
 UNLOCK TABLES;
 
