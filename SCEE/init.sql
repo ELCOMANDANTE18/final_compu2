@@ -204,7 +204,7 @@ LOCK TABLES `tareas` WRITE;
 INSERT INTO `tareas` VALUES
 (1,1,'TP Final - Computación II','Implementar Milestone 5: Docker y Celery.','2026-03-01 08:00:00'),
 (2,3,'Investigación: Sockets vs WebSockets','Documento comparativo de protocolos.','2026-03-01 08:00:00'),
-(3,1,'Implementar IPV6','Tiene que agregar que acepte conexiones ipv6','2026-02-28 12:40:00');
+(3,1,'Implementar IPV6','Tiene que agregar que acepte conexiones ipv6','2026-02-28 13:35:00');
 /*!40000 ALTER TABLE `tareas` ENABLE KEYS */;
 UNLOCK TABLES;
 

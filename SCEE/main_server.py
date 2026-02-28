@@ -153,7 +153,29 @@ class DatabaseManager:
             """
             await cur.execute(query, (int(user_id), int(room_id)))
             res = await cur.fetchall()
-            return "|".join([f"{r[0]}§{r[1]}§{r[2]}" for r in res]) if res else "VACIO"    
+            return "|".join([f"{r[0]}§{r[1]}§{r[2]}" for r in res]) if res else "VACIO"   
+    
+    async def delete_room(self, room_id):
+        async with self.conn.cursor() as cur:
+            # La integridad referencial (ON DELETE CASCADE) se encarga del resto
+            # Pero borramos los mensajes y miembros primero por seguridad
+            await cur.execute("DELETE FROM salas WHERE id = %s", (int(room_id),))
+            return True    
+    
+    async def grade_submission(self, submission_id, grade):
+        async with self.conn.cursor() as cur:
+            # Primero buscamos el ID del alumno
+            await cur.execute("SELECT id_alumno FROM entregas WHERE id = %s", (int(submission_id),))
+            res = await cur.fetchone()
+            if res:
+                id_alumno = res[0]
+                # Luego actualizamos la nota
+                await cur.execute(
+                    "UPDATE entregas SET estado = 'corregido', calificacion = %s WHERE id = %s",
+                    (int(grade), int(submission_id))
+                )
+                return id_alumno # Devolvemos el ID para notificar
+            return None    
 
 
 
@@ -196,6 +218,25 @@ def handle_auth_response(pipe_conn):
             
             writer.write(msg.encode())
             asyncio.create_task(writer.drain())
+
+        # --- DENTRO DE handle_auth_response (main_server.py) ---
+        if status == "OK":
+            if tipo == "GRADE_RES":
+                id_alumno = res.get("id_alumno")
+                # Buscamos al alumno entre los usuarios conectados
+                for w, s in active_sessions.items():
+                    if str(s.get("user_id")) == str(id_alumno):
+                        # Le mandamos un mensaje de CHAT automático
+                        w.write(f"CHAT|SISTEMA|Tu entrega ha sido calificada. Revisa /notas.\n".encode())
+                        asyncio.create_task(w.drain())
+                
+                # Respuesta obligatoria para que el profe no se trabe
+                msg = f"DATA_RES|OK\n"
+
+        if tipo == "DATA_RES" and status == "OK":
+            # Si el profe calificó, el sistema manda un mensaje global de sistema
+            # El cliente lo recibirá mediante el hilo 'listen'
+            msg = f"DATA_RES|OK\n"              
 
 async def handle_client(reader, writer, pipe_conn):
     addr = writer.get_extra_info('peername')
@@ -308,6 +349,16 @@ async def handle_client(reader, writer, pipe_conn):
                         "type": "GET_MY_SUBMISSIONS", 
                         "id_sala": id_sala, 
                         "id_user": sess['user_id'], 
+                        "user": u
+                    })    
+
+                # --- AGREGAR EN handle_client (main_server.py) ---
+                elif m.startswith("DELETE_ROOM|") and sess['rol'] == 'profesor':
+                    # Despachamos al proceso auth para que maneje la base de datos
+                    id_sala = m.split("|")[1]
+                    await loop.run_in_executor(None, pipe_conn.send, {
+                        "type": "DELETE_ROOM", 
+                        "id_sala": id_sala, 
                         "user": u
                     })    
                                 

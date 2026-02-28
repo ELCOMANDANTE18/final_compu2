@@ -20,9 +20,9 @@ def print_banner():
     | $$___\$| $$   \$| $$__    | $$__    
      \$$    \| $$     | $$  \   | $$  \   
      _\$$$$$$| $$   __| $$$$$   | $$$$$   
-    |  \__| $| $$__/  | $$_____ | $$_____ 
-     \$$    $$\$$    $| $$     \| $$     \
-      \$$$$$$  \$$$$$$ \$$$$$$$$ \$$$$$$$$
+    |  \\__| $| $$__/  | $$_____ | $$_____ 
+     \\$$    $$\\$$    $| $$     \\| $$     \\
+      \\$$$$$$  \\$$$$$$ \\$$$$$$$$ \\$$$$$$$$
     """
     print(banner)
     print("="*42)
@@ -55,7 +55,8 @@ def menu_principal(rol):
     print("3. Usuarios activos")
     print(f"{RED}4. Salir{RESET}")
     if rol == "profesor":
-        print("5. Crear sala") 
+        print("5. Crear sala")
+        print("6. Borrar sala") 
     return input("Seleccioná: ")
 
 def main():
@@ -71,11 +72,16 @@ def main():
     p.add_argument("--register", action="store_true", help="Registrar")
     
     args = p.parse_args()
-    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     
+    # --- CONEXIÓN INTELIGENTE (IPv4/IPv6) ---
     try:
-        sock.connect((args.host, args.port))
-        log("NETWORK", f"Conectado a {args.host}:{args.port}")
+        # Obtenemos la información de la dirección automáticamente
+        addr_info = socket.getaddrinfo(args.host, args.port, proto=socket.IPPROTO_TCP)
+        family, kind, proto, canonname, sockaddr = addr_info[0]
+        
+        sock = socket.socket(family, kind, proto)
+        sock.connect(sockaddr)
+        log("NETWORK", f"Conectado a {args.host}:{args.port} (Familia: {family})")
         
         cmd = "REGISTER" if args.register else "LOGIN"
         sock.send(f"{cmd}|{args.u}|{args.p}|{args.r}".encode())
@@ -103,7 +109,12 @@ def main():
                                 print(f" ID: {s.split(':')[0]} | {s.split(':')[1]}")
                         
                         tid = input("\nID para entrar (o Enter para volver): ").strip()
-                        if not tid: continue
+                        
+                        # --- REBOTE PARA EL ALUMNO/PROFE ---
+                        if not tid:
+                            print(f"{YELLOW}[!] Error: No ingresaste un ID. Volviendo al menú...{RESET}")
+                            input("Presioná Enter para continuar...")
+                            continue
 
                         if not tid.isdigit():
                             print(f"{RED}[!] Error: El ID debe ser un número.{RESET}")
@@ -180,26 +191,20 @@ def main():
 
                                 elif txt.startswith("/borrar"):
                                     parts = txt.split(" ")
-                                    # Verificamos que se haya pasado un ID y que no sea una cadena vacía
                                     if len(parts) >= 2 and parts[1].strip():
                                         id_obj = parts[1].strip()
-                                        
-                                        # Validación extra: asegurarse de que el ID sea numérico para evitar errores de tipo
                                         if not id_obj.isdigit():
                                             print(f"{RED}[!] Error: El ID debe ser un número.{RESET}")
                                             continue
 
                                         cmd = "BORRAR_TAREA" if mi_rol == "profesor" else "BORRAR_ENTREGA"
                                         sock.send(f"{cmd}|{id_obj}".encode())
-                                        
-                                        # Esperamos la confirmación del servidor
                                         respuesta_borrar = res_q.get()
                                         if "OK" in respuesta_borrar:
                                             print(f"{GREEN}✅ [S] El elemento con ID {id_obj} fue eliminado correctamente.{RESET}")
                                         else:
                                             print(f"{RED}[!] No se pudo borrar: {respuesta_borrar}{RESET}")
                                     else:
-                                        # Si el ID está vacío o no se proporcionó
                                         print(f"{YELLOW}[!] Error: Debes especificar un ID. Uso: /borrar [ID]{RESET}")
 
                                 # --- COMANDOS PROFESOR ---
@@ -244,7 +249,6 @@ def main():
                                             print(f"{GREEN}[S] Enviado.{RESET}")
                                     else: print(f"{YELLOW}[!] Uso: /subir [ID_TAREA]{RESET}")
 
-                                # --- NUEVA FUNCIÓN: VER MIS ENTREGAS ---
                                 elif txt == "/mis_entregas" and mi_rol != "profesor":
                                     sock.send(f"GET_MY_SUBMISSIONS|{tid}".encode())
                                     m_res = res_q.get().split("|")
@@ -284,6 +288,23 @@ def main():
                         resp_s = res_q.get().split("|")
                         if resp_s[1] == "OK": print(f"{GREEN}Sala creada.{RESET}")
                         else: print(f"{RED}Error: {resp_s[-1]}{RESET}")
+
+                elif opc == "6" and mi_rol == "profesor":
+                    print(f"\n--- {RED}ZONA DE PELIGRO: BORRAR SALA{RESET} ---")
+                    sid = input("Ingresá el ID de la sala a ELIMINAR (o Enter para cancelar): ").strip()
+                    
+                    if not sid or not sid.isdigit():
+                        continue
+
+                    confirm = input(f"{YELLOW}⚠️  ¿Seguro que querés borrar la sala {sid}? (s/n): {RESET}")
+                    if confirm.lower() == 's':
+                        sock.send(f"DELETE_ROOM|{sid}".encode())
+                        
+                        # --- FIX DE LA TRABA ---
+                        respuesta_server = res_q.get() 
+                        print(f"{GREEN}✅ [S] Respuesta: {respuesta_server.split('|')[-1]}{RESET}")
+                        input("\n[PULSA ENTER PARA VOLVER AL MENÚ]") # Esto resetea la terminal
+
 
                 elif opc == "4": 
                     sock.send(b"QUIT") 

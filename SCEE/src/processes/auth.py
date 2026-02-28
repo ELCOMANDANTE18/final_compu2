@@ -128,8 +128,14 @@ async def auth_process_loop(pipe_conn):
                     pipe_conn.send({"status": "OK", "type": "SUBMISSIONS_LIST", "data": data, "user_requested": user})
 
                 elif action == "GRADE_SUBMISSION":
-                    await db.grade_submission(req.get("s_id"), req.get("grade"))
-                    pipe_conn.send({"status": "OK", "type": "DATA_RES", "user_requested": user})
+                    # Capturamos el ID del alumno que devuelve el manager
+                    id_alumno = await db.grade_submission(req.get("s_id"), req.get("grade"))
+                    pipe_conn.send({
+                        "status": "OK", 
+                        "type": "GRADE_RES", # Cambiamos el tipo para que el server lo reconozca
+                        "id_alumno": id_alumno, 
+                        "user_requested": user
+                    })
                 
                 elif action == "GET_GRADES":
                     data = await db.get_grades(u_id)
@@ -141,6 +147,12 @@ async def auth_process_loop(pipe_conn):
                 elif action == "GET_MY_SUBMISSIONS":
                     data = await db.get_my_submissions(u_id, req.get("id_sala"))
                     pipe_conn.send({"status": "OK", "type": "MY_SUBMISSIONS_LIST", "data": data, "user_requested": user})    
+                elif action == "DELETE_ROOM":
+                    # El DatabaseManager ejecutará el DELETE que borra en cascada
+                    await db.delete_room(req.get("id_sala"))
+                    pipe_conn.send({"status": "OK", "type": "DATA_RES", "user_requested": user})
+
+
 
             except Exception as e:
                 print(f"[WORKER ERROR] {e}")
