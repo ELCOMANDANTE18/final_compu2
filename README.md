@@ -19,6 +19,53 @@ Para ejecutar esta aplicación de forma sencilla, se recomienda tener instalado:
 
 * **Docker** y **Docker Compose**.
 * O en su defecto, **Python 3.10+** y una instancia de **MariaDB** y **Redis**.
+## Arquitectura
+```
+       __________________________________________________________________
+      |                                                                 |
+      |                      [ CLIENTES MULTI-PROTOCOLO ]               |
+      |      (Python Clients: vector, messi, abel, etc.)                |
+      |      Conectividad: IPv4 (127.0.0.1) e IPv6 (::1)                |
+      |_________________________________________________________________|
+                |                      |                       |
+                | [ TCP:5001 ]         | [ TCP:5001 ]          | [ TCP:5001 ]
+  ______________|______________________|_______________________|__________
+ |                                                                        |
+ |                 [ DOCKER PROXY / PORT MAPPING ]                        |
+ |            (Mapeo de puertos Dual Stack en el Host)                    |
+ |________________________________________________________________________|
+         |                                           |
+         v                                           v
+  ________________________________________________________________________
+ |                                                                        |
+ |                         [ SERVIDOR PRINCIPAL ]                         |
+ |                      (main_server.py / Asyncio)                        |
+ |   - Dual Stack Socket (host=None) -> Escucha en [::] y [0.0.0.0]       |
+ |   - Gestión asíncrona de sesiones concurrentes                         |
+ |   - Lógica de Broadcast y ruteo de comandos                            |
+ |   - Timezone: America/Argentina/Mendoza (GMT-3)                        |
+ |________________________________________________________________________|
+         |                                           |
+         | [ IPC: Pipe (parent_conn) ]               | [ Broker: Redis ]
+         v                                           v
+  ___________________________           __________________________________
+ |                           |         |                                  |
+ |    [ DB WORKER PROCESS ]  |         |        [ CELERY BEAT ]           |
+ |  (auth.py)               |         |      (Planificador Tareas)       |
+ |   - Aislamiento de DB     |         |    - Ejecuta cada 60 seg.        |
+ |___________________________|         |__________________________________|
+         |                                           |
+         | [ MariaDB Connection ]                    | [ Result Backend ]
+         v                                           v
+  ___________________________           __________________________________
+ |                           |         |                                  |
+ |     [ MARIADB (scee_db) ] | <------ |       [ CELERY WORKER ]          |
+ |   - Volumen Persistente   |         |        (tasks.py / async)        |
+ |   - Tablas: usuarios,     |         |    - Alertas de vencimientos     |
+ |     mensajes, tareas      |         |    - Query: NOW() (Hora Mza)     |
+ |___________________________|         |__________________________________|
+
+```
 
 ## 🚀 Inicio Rápido (Uso Básico)
 
