@@ -72,7 +72,7 @@ Para ejecutar esta aplicación de forma sencilla, se recomienda tener instalado:
  |___________________________|         |__________________________________|
 
 ```
-## Arquitectura
+## Entidades
 ```
 _________________________________________________________________________
  |                                                                         |
