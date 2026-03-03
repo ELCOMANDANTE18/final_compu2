@@ -21,7 +21,7 @@ app = Celery('scee_tasks',
 app.conf.beat_schedule = {
     'revisar-vencimientos-cada-minuto': {
         'task': 'tasks.check_task_deadlines',
-        'schedule': 60.0, 
+        'schedule': float(os.getenv("TASK_CHECK_INTERVAL", 60.0)), 
     },
 }
 app.conf.timezone = 'America/Argentina/Mendoza'

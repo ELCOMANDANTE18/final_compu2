@@ -46,7 +46,13 @@ Para ejecutar esta aplicación de forma sencilla, se recomienda tener instalado:
  |   - Timezone: America/Argentina/Mendoza (GMT-3)                        |
  |________________________________________________________________________|
          |                                           |
-         | [ IPC: Pipe (parent_conn) ]               | [ Broker: Redis ]
+         |   [ loop.run_in_executor ]                |
+         |     |                                     |
+         |     |                                     | 
+         |     |                                     |    
+         |     v                                     |    
+         |                                           |    
+         |    [ IPC: Pipe (parent_conn) ]            |  [ Broker: Redis ]
          v                                           v
   ___________________________           __________________________________
  |                           |         |                                  |
@@ -64,6 +70,48 @@ Para ejecutar esta aplicación de forma sencilla, se recomienda tener instalado:
  |   - Tablas: usuarios,     |         |    - Alertas de vencimientos     |
  |     mensajes, tareas      |         |    - Query: NOW() (Hora Mza)     |
  |___________________________|         |__________________________________|
+
+```
+## Arquitectura
+```
+_________________________________________________________________________
+ |                                                                         |
+ |                      [ ENTIDAD: USUARIOS (usuarios) ]                   |
+ |  - id (PK) : int(11) | username (UNIQUE) : varchar(50)                  |
+ |  - password_hash : varchar(255)                                         |
+ |  - rol : ENUM ('alumno', 'profesor', 'admin')                           |
+ |_________________________________________________________________________|
+          |                      |                       |
+     (Crea Salas)          (Es Miembro)            (Envía/Recibe)
+          |                      |                       |
+  ________v______________________v_______________________v_________________
+ |                                                                         |
+ |                        [ ENTIDAD: SALAS (salas) ]                       |
+ |  - id (PK) : int(11) | nombre : varchar(100)                            |
+ |  - descripcion : text | id_creador (FK) -> usuarios.id                  |
+ |_________________________________________________________________________|
+          |                      |                       |
+    (Contiene Tareas)      (Tiene Miembros)        (Aloja Mensajes)
+          |                      |                       |
+  ________v__________     _______v________________       v_________________
+ |                   |   |                        |     |                  |
+ | [ ENTIDAD: TAREAS ]   | [ MIEMBROS_SALA (Link)]|     | [ ENTIDAD: MSGS ]|
+ | - id (PK) : int(11) |   | - id_usuario (FK)      |     | - id (PK) : int  |
+ | - id_sala (FK)      |   | - id_sala (FK)         |     | - id_sala (FK)   |
+ | - titulo / desc     |   | (PK Compuesta)         |     | - id_usuario (FK)|
+ | - fecha_entrega     |   |________________________|     | - contenido: text|
+ |___________________|                                  |__________________|
+          |
+    (Recibe Entregas)
+          |
+  ________v_________________________________________________________________
+ |                                                                         |
+ |                     [ ENTIDAD: ENTREGAS (entregas) ]                    |
+ |  - id (PK) : int(11) | id_tp (FK) -> tareas.id                          |
+ |  - id_alumno (FK) -> usuarios.id                                        |
+ |  - contenido : text  | fecha_entrega : timestamp                        |
+ |  - estado : ENUM ('entregado', 'corregido') | calificacion : int(11)    |
+ |_________________________________________________________________________|
 
 ```
 

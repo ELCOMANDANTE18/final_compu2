@@ -1,27 +1,20 @@
+# 🚀 SCEE Mendoza - Roadmap de Ingeniería
 
----
+### 🛡️ Seguridad y Resiliencia
+- [ ] **Cifrado TLS/SSL:** Implementar `ssl.wrap_socket` en el servidor para proteger la comunicación Dual Stack.
+- [ ] **Hashing de Contraseñas:** Migrar el almacenamiento de `password_hash` a `bcrypt` o `argon2` en el Worker de Auth, eliminando el texto plano.
+- [ ] **Persistencia de Datos (Docker Volumes):** Mapear `/var/lib/mysql` a un volumen del host en `docker-compose.yml` para que los datos sobrevivan al borrado de contenedores.
 
-# TODO - Roadmap de Mejoras Futuras 🚀
+### ⚡ Optimización de Rendimiento
+- [ ] **Refactorización de IPC:** Reemplazar el `poll()` con un `asyncio.Selector` en el Worker para eliminar el `sleep(0.01)` y reducir el uso de CPU al 0% en reposo.
+- [ ] **Connection Pooling:** Implementar `aiomysql.create_pool` en el `DatabaseManager` para manejar ráfagas de conexiones concurrentes de forma eficiente.
+- [ ] **Broadcast No-Bloqueante:** Envolver el `writer.drain()` en `asyncio.create_task` para que un cliente con lag no retrase el chat del resto de la sala.
 
-Este documento detalla las funcionalidades, optimizaciones técnicas y nuevas características planificadas para las próximas versiones de **SCEE Mendoza**.
+### 🎓 Experiencia del Usuario (UX)
+- [ ] **Pub/Sub Notifications:** Usar canales de Redis para que el Celery Worker envíe alertas de vencimiento directamente a la terminal del alumno en tiempo real.
+- [ ] **Protocolo de Mensajería Robusto:** Implementar **Sequence Numbers** (IDs de mensaje) para que el cliente nunca confunda una respuesta de base de datos con otra.
+- [ ] **Sanitización de Inputs:** Implementar un parser que escape el carácter `|` para evitar "inyecciones de protocolo" en los comandos enviados al servidor.
 
-### 🛠️ Mejoras Técnicas y de Arquitectura
-
-* [ ] **Borrado Lógico:** Implementar un sistema de `is_deleted` en MariaDB para evitar la pérdida permanente de datos y permitir la recuperación de registros (Tareas, Entregas, Notas).
-* [ ] **Cifrado SSL/TLS:** Añadir una capa de seguridad en la comunicación de sockets para que los mensajes y credenciales viajen cifrados entre el cliente y el servidor.
-* [ ] **Optimización de Pipes:** Refinar el protocolo de comunicación IPC entre el servidor asíncrono y el worker de persistencia para reducir la latencia en ráfagas de alta carga.
-* [ ] **Logs Centralizados:** Implementar un sistema de registro de eventos (logging) que almacene errores y auditorías en archivos rotativos dentro de los contenedores.
-
-### ✨ Nuevas Funcionalidades para el Usuario
-
-* [ ] **Interfaz Gráfica (GUI):** Desarrollar un cliente visual (utilizando librerías como Tkinter o PyQt) para mejorar la usabilidad frente a la terminal actual.
-* [ ] **Notificaciones Push:** Integrar alertas de escritorio nativas para que los alumnos reciban avisos de "Vencimiento" o "Calificación" aunque la aplicación esté en segundo plano.
-* [ ] **Gestión de Archivos Pro:** Mejorar el comando `/subir` para permitir el envío de archivos adjuntos pesados mediante *streaming* de bytes, evitando bloqueos de memoria.
-* [ ] **Perfiles de Usuario:** Permitir que cada alumno o profesor gestione una descripción, foto de perfil y correo electrónico de contacto.
-
-### 🌐 Infraestructura y Escalabilidad
-
-* [ ] **Orquestación con Kubernetes:** Crear los archivos de configuración (manifiestos) para permitir el despliegue del sistema en clústeres de alta disponibilidad.
-* [ ] **Dashboard de Monitoreo:** Integrar una herramienta de visualización (como Grafana) para monitorear el estado de la base de datos y la cola de mensajes en Redis.
-
----
+### ☁️ Infraestructura
+- [ ] **Healthchecks:** Configurar `healthcheck` en el servicio de MariaDB para que el servidor y los workers esperen automáticamente a que la DB esté lista para recibir consultas.
+- [ ] **Multi-stage Builds:** Optimizar el `Dockerfile` para reducir el tamaño de la imagen de 400MB a ~150MB eliminando herramientas de compilación en la capa final.

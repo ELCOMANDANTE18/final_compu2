@@ -26,7 +26,7 @@ services:
     container_name: scee_server
     command: python src/main_server.py
     ports:
-      - "5001:5001"
+      - "${SERVER_PORT}:${SERVER_PORT}"
     depends_on:
       - db
       - redis
